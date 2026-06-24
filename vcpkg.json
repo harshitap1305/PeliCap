@@ -1,0 +1,10 @@
+{
+  "name": "palicap",
+  "version": "0.1.0",
+  "dependencies": [
+    "pcapplusplus",
+    "drogon",
+    "nlohmann-json",
+    "boost-lockfree"
+  ]
+}
