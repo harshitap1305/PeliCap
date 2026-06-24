@@ -1,0 +1,17 @@
+# Dependencies
+vcpkg/
+vcpkg_installed/
+
+# Build directories
+build/
+out/
+bin/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
