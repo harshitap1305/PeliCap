@@ -12,12 +12,15 @@ CaptureSession::~CaptureSession() {
 }
 
 void CaptureSession::start() {
-    device_ = pcpp::PcapLiveDeviceList::getInstance().getPcapLiveDeviceByName(config_.interface_name);
+    device_ = pcpp::PcapLiveDeviceList::getInstance().getDeviceByName(config_.interface_name);
     if (!device_) {
         throw std::runtime_error("Cannot find interface: " + config_.interface_name);
     }
 
-    if (!device_->open(config_.promiscuous ? pcpp::PcapLiveDevice::Promiscuous : pcpp::PcapLiveDevice::Normal)) {
+    pcpp::PcapLiveDevice::DeviceConfiguration devConfig(
+        config_.promiscuous ? pcpp::PcapLiveDevice::Promiscuous : pcpp::PcapLiveDevice::Normal
+    );
+    if (!device_->open(devConfig)) {
         throw std::runtime_error("Cannot open interface: " + config_.interface_name);
     }
 

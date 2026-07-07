@@ -21,7 +21,9 @@ add_executable(palicap
 target_include_directories(palicap PRIVATE core)
 
 target_link_libraries(palicap PRIVATE 
-    PcapPlusPlus::PcapPlusPlus
+    PcapPlusPlus::Pcap++
+    PcapPlusPlus::Common++
+    PcapPlusPlus::Packet++
     Drogon::Drogon
     nlohmann_json::nlohmann_json
 )

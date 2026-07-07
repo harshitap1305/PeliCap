@@ -15,7 +15,10 @@ RUN apt-get update && apt-get install -y \
     uuid-dev \
     zlib1g-dev \
     libbrotli-dev \
-    libboost-all-dev
+    libboost-all-dev \
+    bison \
+    flex \
+    ninja-build
 
 WORKDIR /build
 COPY . /build
@@ -33,14 +36,15 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+RUN useradd -m palicap
 COPY --from=builder /build/build/palicap /app/palicap
+RUN chown -R palicap:palicap /app
 
 # Grant capability to capture packets without root
 RUN setcap cap_net_raw,cap_net_admin=eip /app/palicap
 
 EXPOSE 8080
 
-RUN useradd -m palicap
 USER palicap
 
 CMD ["./palicap"]

@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  palicap:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    network_mode: "host" # This is critical: allows the container to see host network interfaces
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    restart: unless-stopped
