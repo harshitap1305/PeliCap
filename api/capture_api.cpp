@@ -181,7 +181,7 @@ public:
         Json::Value r;
         r["total"]   = Json::UInt64(total_parsed_.load());
         r["http"]    = Json::UInt64(proto_http_.load());
-        r["tls"]     = Json::UInt64(proto_tls_.load());
+        r["https"]   = Json::UInt64(proto_tls_.load());
         r["dns"]     = Json::UInt64(proto_dns_.load());
         r["icmp"]    = Json::UInt64(proto_icmp_.load());
         r["arp"]     = Json::UInt64(proto_arp_.load());
