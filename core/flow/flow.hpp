@@ -162,11 +162,12 @@ struct Flow {
     int64_t expiry_ns     = 0;  // wall-clock monotonic — when to evict
 
     // ── Packet / byte counters ────────────────────────────────────────────────
-    uint64_t fwd_packets   = 0;  // flow.src → flow.dst
-    uint64_t rev_packets   = 0;  // flow.dst → flow.src
-    uint64_t fwd_bytes     = 0;
-    uint64_t rev_bytes     = 0;
-    uint64_t payload_bytes = 0;  // bytes excluding all headers
+    uint64_t fwd_packets        = 0;  // flow.src → flow.dst
+    uint64_t rev_packets        = 0;  // flow.dst → flow.src
+    uint64_t fwd_bytes          = 0;
+    uint64_t rev_bytes          = 0;
+    uint64_t payload_bytes      = 0;  // bytes excluding all headers
+    uint64_t prev_metrics_bytes = 0;  // last total_bytes() snapshot — used by MetricsEngine to compute delta
 
     // ── TCP state ─────────────────────────────────────────────────────────────
     TcpFlowState tcp_state    = TcpFlowState::INIT;
@@ -196,9 +197,10 @@ struct Flow {
     std::string tls_sni;
     std::string http_host;
     std::string dns_query;
-    uint32_t    http_request_count  = 0;
-    uint32_t    http_response_count = 0;
-    uint32_t    dns_transaction_count = 0;
+    uint32_t    http_request_count        = 0;
+    uint32_t    http_response_count       = 0;
+    uint32_t    dns_transaction_count     = 0;
+    int64_t     http_request_first_seen_ns = 0;  // timestamp of first HTTP request — for latency calc
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
     bool is_active  = true;

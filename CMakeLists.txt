@@ -17,6 +17,7 @@ add_executable(palicap
     core/capture/pcap_loader.cpp
     core/dissector/dissector_engine.cpp
     core/flow/flow_engine.cpp
+    core/metrics/metrics_engine.cpp
     api/capture_api.cpp
     main.cpp
 )

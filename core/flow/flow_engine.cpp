@@ -125,7 +125,7 @@ void FlowEngine::update_flow(Flow& f, const ParsedPacket& pkt, const FlowKey& ke
 
     if (pkt.tcp)  update_tcp(f, *pkt.tcp,  fwd, pkt.timestamp_ns);
     if (pkt.dns)  update_dns(f, *pkt.dns,  pkt.timestamp_ns);
-    if (pkt.http) update_http(f, *pkt.http);
+    if (pkt.http) update_http(f, *pkt.http, pkt.timestamp_ns);
     if (pkt.tls)  update_tls(f, *pkt.tls);
 }
 
@@ -272,11 +272,14 @@ void FlowEngine::update_dns(Flow& f, const DnsFields& dns, int64_t ts_ns) {
 
 // ── HTTP / TLS ────────────────────────────────────────────────────────────────
 
-void FlowEngine::update_http(Flow& f, const HttpFields& http) {
+void FlowEngine::update_http(Flow& f, const HttpFields& http, int64_t ts_ns) {
     if (http.is_request) {
         ++f.http_request_count;
         if (f.http_host.empty() && !http.host.empty())
             f.http_host = http.host;
+        // Record timestamp of first HTTP request for latency calculation
+        if (f.http_request_first_seen_ns == 0)
+            f.http_request_first_seen_ns = ts_ns;
     } else {
         ++f.http_response_count;
     }

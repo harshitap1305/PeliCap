@@ -81,7 +81,7 @@ private:
     // ── Per-protocol updaters (called with flow.mtx_ held) ───────────────────
     void update_tcp (Flow& f, const TcpFields&  tcp,  bool is_fwd, int64_t ts_ns);
     void update_dns (Flow& f, const DnsFields&  dns,  int64_t ts_ns);
-    void update_http(Flow& f, const HttpFields& http);
+    void update_http(Flow& f, const HttpFields& http, int64_t ts_ns);
     void update_tls (Flow& f, const TlsFields&  tls);
 
     // ── Helpers ───────────────────────────────────────────────────────────────
