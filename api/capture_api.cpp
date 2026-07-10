@@ -8,6 +8,7 @@
 #include "dissector/serializer.hpp"
 #include "flow/flow_engine.hpp"
 #include "flow/flow_serializer.hpp"
+#include "metrics/metrics_engine.hpp"
 #include <memory>
 #include <mutex>
 #include <deque>
@@ -24,9 +25,10 @@ static constexpr size_t CLOSED_FLOW_HISTORY = 10000;
 class CaptureApi : public HttpController<CaptureApi> {
 public:
     CaptureApi() {
-        raw_bus_    = std::make_unique<PacketBus>();
-        parsed_bus_ = std::make_unique<ParsedPacketBus>();
-        flow_engine_= std::make_unique<FlowEngine>();
+        raw_bus_       = std::make_unique<PacketBus>();
+        parsed_bus_    = std::make_unique<ParsedPacketBus>();
+        flow_engine_   = std::make_unique<FlowEngine>();
+        metrics_engine_= std::make_unique<MetricsEngine>();
 
         // ── Raw → Dissect → ParsedPacketBus ──────────────────────────────────
         raw_bus_->subscribe([this](const CapturedPacket& raw) {
@@ -67,9 +69,13 @@ public:
             flow_engine_->process(pp);
         });
 
-        // FlowEngine event callback — captures CLOSED/EXPIRED flows into history
+        // FlowEngine event callback — feeds MetricsEngine AND captures closed-flow history
         flow_engine_->set_event_callback(
             [this](FlowEvent event, std::shared_ptr<Flow> flow) {
+                // ── Feed MetricsEngine ────────────────────────────────────
+                metrics_engine_->on_flow_event(event, flow);
+
+                // ── Capture closed/expired flow history for /api/flows/closed
                 if (event == FlowEvent::CLOSED || event == FlowEvent::EXPIRED) {
                     std::lock_guard<std::mutex> lk(closed_flows_mutex_);
                     closed_flows_.push_back(flow_to_json(*flow));
@@ -82,27 +88,35 @@ public:
         raw_bus_->start();
         parsed_bus_->start();
         flow_engine_->start();
+        metrics_engine_->start_housekeeping();
     }
 
     ~CaptureApi() {
-        if (session_)     session_->stop();
-        if (flow_engine_) flow_engine_->stop();
-        if (raw_bus_)     raw_bus_->stop();
-        if (parsed_bus_)  parsed_bus_->stop();
+        if (session_)         session_->stop();
+        if (metrics_engine_)  metrics_engine_->stop_housekeeping();
+        if (flow_engine_)     flow_engine_->stop();
+        if (raw_bus_)         raw_bus_->stop();
+        if (parsed_bus_)      parsed_bus_->stop();
     }
 
     METHOD_LIST_BEGIN
-    ADD_METHOD_TO(CaptureApi::getInterfaces,   "/api/interfaces",        Get);
-    ADD_METHOD_TO(CaptureApi::startCapture,    "/api/capture/start",     Post);
-    ADD_METHOD_TO(CaptureApi::stopCapture,     "/api/capture/stop",      Post);
-    ADD_METHOD_TO(CaptureApi::getStats,        "/api/stats",             Get);
-    ADD_METHOD_TO(CaptureApi::getPackets,      "/api/packets",           Get);
-    ADD_METHOD_TO(CaptureApi::getPacketStats,  "/api/packets/stats",     Get);
+    ADD_METHOD_TO(CaptureApi::getInterfaces,      "/api/interfaces",           Get);
+    ADD_METHOD_TO(CaptureApi::startCapture,       "/api/capture/start",        Post);
+    ADD_METHOD_TO(CaptureApi::stopCapture,        "/api/capture/stop",         Post);
+    ADD_METHOD_TO(CaptureApi::getStats,           "/api/stats",                Get);
+    ADD_METHOD_TO(CaptureApi::getPackets,         "/api/packets",              Get);
+    ADD_METHOD_TO(CaptureApi::getPacketStats,     "/api/packets/stats",        Get);
     // ── Flow endpoints ────────────────────────────────────────────────────────
-    ADD_METHOD_TO(CaptureApi::getFlows,        "/api/flows",             Get);
-    ADD_METHOD_TO(CaptureApi::getFlowStats,    "/api/flows/stats",       Get);
-    ADD_METHOD_TO(CaptureApi::getClosedFlows,  "/api/flows/closed",      Get);
-    ADD_METHOD_TO(CaptureApi::getFlowById,     "/api/flows/{id}",        Get);
+    ADD_METHOD_TO(CaptureApi::getFlows,           "/api/flows",                Get);
+    ADD_METHOD_TO(CaptureApi::getFlowStats,       "/api/flows/stats",          Get);
+    ADD_METHOD_TO(CaptureApi::getClosedFlows,     "/api/flows/closed",         Get);
+    ADD_METHOD_TO(CaptureApi::getFlowById,        "/api/flows/{id}",           Get);
+    // ── Metrics endpoints (Module 4) ──────────────────────────────────────────
+    ADD_METHOD_TO(CaptureApi::getMetricsNetwork,  "/api/metrics/network",      Get);
+    ADD_METHOD_TO(CaptureApi::getMetricsTcp,      "/api/metrics/tcp",          Get);
+    ADD_METHOD_TO(CaptureApi::getMetricsDns,      "/api/metrics/dns",          Get);
+    ADD_METHOD_TO(CaptureApi::getMetricsHttp,     "/api/metrics/http",         Get);
+    ADD_METHOD_TO(CaptureApi::getMetricsSummary,  "/api/metrics/summary",      Get);
     METHOD_LIST_END
 
     // ── GET /api/interfaces ──────────────────────────────────────────────────
@@ -144,6 +158,7 @@ public:
             closed_flows_.clear();
         }
         flow_engine_->reset();
+        metrics_engine_->reset();
 
         total_raw_ = 0; total_parsed_ = 0; parsed_dropped_ = 0;
         proto_http_ = proto_tls_ = proto_dns_ = proto_icmp_ = proto_arp_ = 0;
@@ -362,7 +377,151 @@ public:
         cb(resp);
     }
 
+    // ── GET /api/metrics/network?window=60 ───────────────────────────────────
+    void getMetricsNetwork(const HttpRequestPtr& req,
+                            std::function<void(const HttpResponsePtr&)>&& cb) const {
+        size_t window = parse_window(req);
+        auto snap = metrics_engine_->network_snapshot(window);
+
+        nlohmann::json j;
+        j["window_sec"]        = window;
+        j["bps_in"]            = snap.bytes_in_per_sec * 8.0;
+        j["bps_out"]           = snap.bytes_out_per_sec * 8.0;
+        j["bytes_in_per_sec"]  = snap.bytes_in_per_sec;
+        j["bytes_out_per_sec"] = snap.bytes_out_per_sec;
+        j["packets_per_sec"]   = snap.packets_per_sec;
+        j["new_flows_per_sec"] = snap.new_flows_per_sec;
+        j["active_flows"]      = snap.active_flows;
+
+        j["top_talkers"] = nlohmann::json::array();
+        for (auto& e : snap.top_talkers)
+            j["top_talkers"].push_back({{"ip", e.key}, {"bytes", e.value}});
+
+        j["top_destinations"] = nlohmann::json::array();
+        for (auto& e : snap.top_destinations)
+            j["top_destinations"].push_back({{"ip", e.key}, {"bytes", e.value}});
+
+        j["protocol_breakdown"] = nlohmann::json::array();
+        for (auto& e : snap.protocol_breakdown)
+            j["protocol_breakdown"].push_back({{"protocol", e.key}, {"count", e.value}});
+
+        send_json(cb, j);
+    }
+
+    // ── GET /api/metrics/tcp?window=60 ───────────────────────────────────────
+    void getMetricsTcp(const HttpRequestPtr& req,
+                        std::function<void(const HttpResponsePtr&)>&& cb) const {
+        size_t window = parse_window(req);
+        auto snap = metrics_engine_->tcp_snapshot(window);
+
+        nlohmann::json j;
+        j["window_sec"]             = window;
+        j["rtt_p50_us"]             = snap.rtt_p50_us;
+        j["rtt_p95_us"]             = snap.rtt_p95_us;
+        j["rtt_p99_us"]             = snap.rtt_p99_us;
+        j["retransmission_rate_pct"] = snap.retransmission_rate_pct;
+        j["zero_window_rate"]       = snap.zero_window_rate;
+        j["avg_flow_duration_ms"]   = snap.avg_flow_duration_ms;
+        j["avg_setup_time_ms"]      = snap.avg_setup_time_ms;
+        j["rst_per_min"]            = snap.rst_per_min;
+
+        j["worst_rtt_flows"] = nlohmann::json::array();
+        for (auto& e : snap.worst_rtt_flows)
+            j["worst_rtt_flows"].push_back({{"flow", e.key}, {"avg_rtt_ms", e.avg}});
+
+        send_json(cb, j);
+    }
+
+    // ── GET /api/metrics/dns?window=60 ───────────────────────────────────────
+    void getMetricsDns(const HttpRequestPtr& req,
+                        std::function<void(const HttpResponsePtr&)>&& cb) const {
+        size_t window = parse_window(req);
+        auto snap = metrics_engine_->dns_snapshot(window);
+
+        nlohmann::json j;
+        j["window_sec"]        = window;
+        j["avg_resolution_ms"] = snap.avg_resolution_ms;
+        j["p95_resolution_ms"] = snap.p95_resolution_ms;
+        j["p99_resolution_ms"] = snap.p99_resolution_ms;
+        j["nxdomain_rate_pct"] = snap.nxdomain_rate_pct;
+        j["queries_per_sec"]   = snap.queries_per_sec;
+
+        j["top_domains"] = nlohmann::json::array();
+        for (auto& e : snap.top_domains)
+            j["top_domains"].push_back({{"domain", e.key}, {"queries", e.value}});
+
+        j["slowest_domains"] = nlohmann::json::array();
+        for (auto& e : snap.slowest_domains)
+            j["slowest_domains"].push_back({{"domain", e.key}, {"avg_ms", e.avg}});
+
+        send_json(cb, j);
+    }
+
+    // ── GET /api/metrics/http?window=60 ──────────────────────────────────────
+    void getMetricsHttp(const HttpRequestPtr& req,
+                         std::function<void(const HttpResponsePtr&)>&& cb) const {
+        size_t window = parse_window(req);
+        auto snap = metrics_engine_->http_snapshot(window);
+
+        nlohmann::json j;
+        j["window_sec"]      = window;
+        j["req_per_sec"]     = snap.req_per_sec;
+        j["latency_p50_ms"]  = snap.latency_p50_ms;
+        j["latency_p95_ms"]  = snap.latency_p95_ms;
+        j["latency_p99_ms"]  = snap.latency_p99_ms;
+        j["error_rate_pct"]  = snap.error_rate_pct;
+        j["server_error_pct"]= snap.server_error_pct;
+        j["bytes_per_sec"]   = snap.bytes_per_sec;
+
+        j["top_endpoints"] = nlohmann::json::array();
+        for (auto& e : snap.top_endpoints)
+            j["top_endpoints"].push_back({{"endpoint", e.key}, {"requests", e.value}});
+
+        j["slowest_endpoints"] = nlohmann::json::array();
+        for (auto& e : snap.slowest_endpoints)
+            j["slowest_endpoints"].push_back({{"endpoint", e.key}, {"avg_ms", e.avg}});
+
+        j["top_hosts"] = nlohmann::json::array();
+        for (auto& e : snap.top_hosts)
+            j["top_hosts"].push_back({{"host", e.key}, {"requests", e.value}});
+
+        j["status_breakdown"] = nlohmann::json::array();
+        for (auto& e : snap.status_breakdown)
+            j["status_breakdown"].push_back({{"status", e.key}, {"count", e.value}});
+
+        send_json(cb, j);
+    }
+
+    // ── GET /api/metrics/summary?window=60 ───────────────────────────────────
+    void getMetricsSummary(const HttpRequestPtr& req,
+                            std::function<void(const HttpResponsePtr&)>&& cb) const {
+        size_t window = parse_window(req);
+        auto ctx = metrics_engine_->ai_context_snapshot(window);
+        // ai_context_snapshot already produces the combined JSON
+        send_json(cb, ctx);
+    }
+
 private:
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    static size_t parse_window(const HttpRequestPtr& req) {
+        size_t window = 60;
+        auto wp = req->getParameter("window");
+        if (!wp.empty()) {
+            try { window = std::max(size_t(1), std::min((size_t)std::stoul(wp), size_t(3600))); }
+            catch (...) {}
+        }
+        return window;
+    }
+
+    static void send_json(std::function<void(const HttpResponsePtr&)>& cb,
+                          const nlohmann::json& j) {
+        auto resp = HttpResponse::newHttpResponse();
+        resp->setStatusCode(k200OK);
+        resp->setContentTypeCode(CT_APPLICATION_JSON);
+        resp->setBody(j.dump());
+        cb(resp);
+    }
+
     mutable std::mutex              ctrl_mutex_;
     mutable std::mutex              history_mutex_;
     mutable std::mutex              closed_flows_mutex_;
@@ -370,6 +529,7 @@ private:
     std::unique_ptr<ParsedPacketBus>parsed_bus_;
     std::unique_ptr<CaptureSession> session_;
     std::unique_ptr<FlowEngine>     flow_engine_;
+    std::unique_ptr<MetricsEngine>  metrics_engine_;
     std::deque<nlohmann::json>      history_;
     std::deque<nlohmann::json>      closed_flows_;
 
