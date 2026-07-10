@@ -5,6 +5,7 @@
     "pcapplusplus",
     "drogon",
     "nlohmann-json",
-    "boost-lockfree"
+    "boost-lockfree",
+    "abseil"
   ]
 }
