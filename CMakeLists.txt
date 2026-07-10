@@ -14,6 +14,7 @@ add_executable(palicap
     core/capture/interface_discovery.cpp
     core/capture/capture_session.cpp
     core/capture/pcap_loader.cpp
+    core/dissector/dissector_engine.cpp
     api/capture_api.cpp
     main.cpp
 )
