@@ -6,6 +6,7 @@
     "drogon",
     "nlohmann-json",
     "boost-lockfree",
-    "abseil"
+    "abseil",
+    "libpq"
   ]
 }

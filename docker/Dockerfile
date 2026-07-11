@@ -47,6 +47,7 @@ RUN cd /build && /vcpkg/vcpkg install --triplet x64-linux
 # ── Layer 5: Compile application (re-runs on any source code change) ─────────
 # Only now do we copy the full source tree
 COPY . .
+COPY config/ /app/config/
 
 RUN cmake -B build -S . \
     -DCMAKE_TOOLCHAIN_FILE=/vcpkg/scripts/buildsystems/vcpkg.cmake \
@@ -59,11 +60,13 @@ FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y \
     libpcap0.8 \
     libcap2-bin \
+    libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 RUN useradd -m palicap
 COPY --from=builder /build/build/palicap /app/palicap
+COPY --from=builder /app/config/ /app/config/
 RUN chown -R palicap:palicap /app
 
 # Grant capability to capture packets without root

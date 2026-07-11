@@ -5,8 +5,34 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    network_mode: "host" # This is critical: allows the container to see host network interfaces
+    network_mode: "host"  # Required: allows capture of host network interfaces
     cap_add:
       - NET_RAW
       - NET_ADMIN
+    environment:
+      - PG_DSN=host=localhost port=5434 dbname=palicap user=palicap password=palicap
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    network_mode: "host"
+    environment:
+      POSTGRES_USER: palicap
+      POSTGRES_PASSWORD: palicap
+      POSTGRES_DB: palicap
+      PGPORT: 5434     
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./sql/001_alerts.sql:/docker-entrypoint-initdb.d/001_alerts.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U palicap -d palicap -p 5434"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pg_data:
