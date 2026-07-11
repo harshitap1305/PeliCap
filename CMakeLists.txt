@@ -10,6 +10,7 @@ find_package(Drogon CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Boost REQUIRED)
 find_package(absl CONFIG REQUIRED)
+find_package(PostgreSQL REQUIRED)
 
 add_executable(palicap
     core/capture/interface_discovery.cpp
@@ -18,11 +19,12 @@ add_executable(palicap
     core/dissector/dissector_engine.cpp
     core/flow/flow_engine.cpp
     core/metrics/metrics_engine.cpp
+    core/detection/detection_engine.cpp
     api/capture_api.cpp
     main.cpp
 )
 
-target_include_directories(palicap PRIVATE core)
+target_include_directories(palicap PRIVATE core api)
 
 target_link_libraries(palicap PRIVATE
     PcapPlusPlus::Pcap++
@@ -32,6 +34,7 @@ target_link_libraries(palicap PRIVATE
     nlohmann_json::nlohmann_json
     absl::flat_hash_map
     absl::hash
+    PostgreSQL::PostgreSQL
 )
 
 if(TARGET Boost::headers)

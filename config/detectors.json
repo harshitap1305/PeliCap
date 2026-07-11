@@ -1,0 +1,63 @@
+{
+  "detectors": {
+    "tcp_retransmission": {
+      "enabled": true,
+      "static_threshold": 5.0,
+      "sigma": 3.0,
+      "cooldown_sec": 60
+    },
+    "high_rtt": {
+      "enabled": true,
+      "static_threshold": 200000.0,
+      "sigma": 3.0,
+      "cooldown_sec": 120
+    },
+    "zero_window": {
+      "enabled": true,
+      "static_threshold": 1.0,
+      "sigma": 3.0,
+      "cooldown_sec": 60
+    },
+    "dns_latency": {
+      "enabled": true,
+      "static_threshold": 500.0,
+      "sigma": 3.0,
+      "cooldown_sec": 120
+    },
+    "dns_nxdomain": {
+      "enabled": true,
+      "static_threshold": 10.0,
+      "sigma": 4.0,
+      "cooldown_sec": 300
+    },
+    "http_error_rate": {
+      "enabled": true,
+      "static_threshold": 5.0,
+      "sigma": 3.0,
+      "cooldown_sec": 60
+    },
+    "http_latency": {
+      "enabled": true,
+      "static_threshold": 1000.0,
+      "sigma": 3.0,
+      "cooldown_sec": 120
+    },
+    "traffic_spike": {
+      "enabled": true,
+      "static_threshold": 100000000.0,
+      "sigma": 4.0,
+      "cooldown_sec": 30
+    },
+    "port_scan": {
+      "enabled": true,
+      "ports_per_minute": 20,
+      "hosts_per_minute": 15,
+      "cooldown_sec": 300
+    },
+    "large_flow": {
+      "enabled": true,
+      "bytes_threshold": 104857600,
+      "duration_sec": 300
+    }
+  }
+}
