@@ -8,9 +8,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(PcapPlusPlus CONFIG REQUIRED)
 find_package(Drogon CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
-find_package(Boost REQUIRED)
+find_package(Boost REQUIRED COMPONENTS lockfree)
 find_package(absl CONFIG REQUIRED)
 find_package(PostgreSQL REQUIRED)
+find_package(libpqxx CONFIG REQUIRED)
 
 add_executable(palicap
     core/capture/interface_discovery.cpp
@@ -20,6 +21,12 @@ add_executable(palicap
     core/flow/flow_engine.cpp
     core/metrics/metrics_engine.cpp
     core/detection/detection_engine.cpp
+    core/storage/storage_engine.cpp
+    core/storage/pg_connection_pool.cpp
+    core/storage/batch_writer.cpp
+    core/storage/pcap_file_manager.cpp
+    core/storage/retention/retention_manager.cpp
+    core/storage/migrations/migration_runner.cpp
     api/capture_api.cpp
     main.cpp
 )
@@ -35,10 +42,7 @@ target_link_libraries(palicap PRIVATE
     absl::flat_hash_map
     absl::hash
     PostgreSQL::PostgreSQL
+    libpqxx::pqxx
 )
 
-if(TARGET Boost::headers)
-    target_link_libraries(palicap PRIVATE Boost::headers)
-else()
-    target_include_directories(palicap PRIVATE ${Boost_INCLUDE_DIRS})
-endif()
+target_link_libraries(palicap PRIVATE Boost::lockfree)

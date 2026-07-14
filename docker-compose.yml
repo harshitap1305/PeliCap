@@ -17,16 +17,16 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:16-alpine
+    image: timescale/timescaledb:latest-pg16
     network_mode: "host"
     environment:
       POSTGRES_USER: palicap
       POSTGRES_PASSWORD: palicap
       POSTGRES_DB: palicap
       PGPORT: 5434     
+    command: ["postgres", "-c", "shared_preload_libraries=timescaledb"]
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./sql/001_alerts.sql:/docker-entrypoint-initdb.d/001_alerts.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U palicap -d palicap -p 5434"]
       interval: 5s

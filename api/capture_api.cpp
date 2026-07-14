@@ -11,6 +11,7 @@
 #include "metrics/metrics_engine.hpp"
 #include "detection/detection_engine.hpp"
 #include "alert_ws_controller.hpp"
+#include "storage/storage_engine.hpp"
 #include <memory>
 #include <mutex>
 #include <deque>
@@ -28,6 +29,8 @@ static constexpr size_t CLOSED_FLOW_HISTORY = 10000;
 class CaptureApi : public HttpController<CaptureApi> {
 public:
     CaptureApi() {
+        LOG_INFO << "CaptureApi CONSTRUCTOR CALLED!";
+        num_instances++;
         raw_bus_          = std::make_unique<PacketBus>();
         parsed_bus_       = std::make_unique<ParsedPacketBus>();
         flow_engine_      = std::make_unique<FlowEngine>();
@@ -38,18 +41,36 @@ public:
         detection_engine_->load_config("/app/config/detectors.json");
         detection_engine_->load_baselines("/app/baselines.json");
 
-        // Connect to PostgreSQL if env var is set
         const char* dsn = std::getenv("PG_DSN");
-        if (dsn) detection_engine_->connect_postgres(std::string(dsn));
+        if (dsn) {
+            detection_engine_->connect_postgres(std::string(dsn));
+            std::string pcap_dir = std::getenv("PCAP_DIR") ? std::getenv("PCAP_DIR") : "/tmp/pcap";
+            storage_engine_ = std::make_unique<storage::StorageEngine>(std::string(dsn), pcap_dir);
+            storage_engine_->start();
 
-        // Wire WebSocket broadcast into AlertStore
-        detection_engine_->store().add_callback(
-            [](const Alert& a) { AlertWsController::broadcast(a); }
-        );
+            detection_engine_->store().add_callback(
+                [](const Alert& a) { AlertWsController::broadcast(a); }
+            );
+            detection_engine_->store().add_callback(
+                [this](const Alert& a) {
+                    if (storage_engine_) {
+                        auto a_ptr = std::make_shared<Alert>(a);
+                        storage_engine_->write_alert(a_ptr);
+                    }
+                }
+            );
+        } else {
+            detection_engine_->store().add_callback(
+                [](const Alert& a) { AlertWsController::broadcast(a); }
+            );
+        }
 
         // ── Raw → Dissect → ParsedPacketBus ──────────────────────────────────
         raw_bus_->subscribe([this](const CapturedPacket& raw) {
             total_raw_++;
+            if (storage_engine_) {
+                storage_engine_->write_raw_packet(raw);
+            }
             auto* pp = new ParsedPacket(DissectorEngine::dissect(raw));
             if (!parsed_bus_->publish(pp)) {
                 parsed_dropped_++;
@@ -98,6 +119,10 @@ public:
 
                 // ── Capture closed/expired flow history for /api/flows/closed
                 if (event == FlowEvent::CLOSED || event == FlowEvent::EXPIRED) {
+                    if (storage_engine_) {
+                        storage_engine_->write_flow(flow);
+                    }
+
                     std::lock_guard<std::mutex> lk(closed_flows_mutex_);
                     closed_flows_.push_back(flow_to_json(*flow));
                     if (closed_flows_.size() > CLOSED_FLOW_HISTORY)
@@ -115,6 +140,7 @@ public:
 
     ~CaptureApi() {
         if (session_)          session_->stop();
+        if (storage_engine_)   storage_engine_->stop();
         if (detection_engine_) {
             detection_engine_->save_baselines("/app/baselines.json");
             detection_engine_->stop();
@@ -125,13 +151,18 @@ public:
         if (parsed_bus_)       parsed_bus_->stop();
     }
 
+    static int num_instances;
+    
     METHOD_LIST_BEGIN
+    ADD_METHOD_TO(CaptureApi::getTest,            "/api/test",                 Get);
     ADD_METHOD_TO(CaptureApi::getInterfaces,      "/api/interfaces",           Get);
     ADD_METHOD_TO(CaptureApi::startCapture,       "/api/capture/start",        Post);
     ADD_METHOD_TO(CaptureApi::stopCapture,        "/api/capture/stop",         Post);
     ADD_METHOD_TO(CaptureApi::getStats,           "/api/stats",                Get);
     ADD_METHOD_TO(CaptureApi::getPackets,         "/api/packets",              Get);
     ADD_METHOD_TO(CaptureApi::getPacketStats,     "/api/packets/stats",        Get);
+    // ── Storage endpoints ─────────────────────────────────────────────────────
+    ADD_METHOD_TO(CaptureApi::getStorageStatus,   "/api/storage/status",       Get);
     // ── Flow endpoints ────────────────────────────────────────────────────────
     ADD_METHOD_TO(CaptureApi::getFlows,           "/api/flows",                Get);
     ADD_METHOD_TO(CaptureApi::getFlowStats,       "/api/flows/stats",          Get);
@@ -150,6 +181,15 @@ public:
     ADD_METHOD_TO(CaptureApi::getDetectors,        "/api/detectors",            Get);
     ADD_METHOD_TO(CaptureApi::setDetectorConfig,   "/api/detectors/{type}/config", Post);
     METHOD_LIST_END
+
+    // ── GET /api/test ────────────────────────────────────────────────────────
+    void getTest(const HttpRequestPtr& req,
+                       std::function<void(const HttpResponsePtr&)>&& cb) const {
+        Json::Value ret;
+        ret["instances"] = num_instances;
+        ret["capturing"] = (session_ != nullptr);
+        cb(HttpResponse::newHttpJsonResponse(ret));
+    }
 
     // ── GET /api/interfaces ──────────────────────────────────────────────────
     void getInterfaces(const HttpRequestPtr& req,
@@ -217,6 +257,7 @@ public:
                      std::function<void(const HttpResponsePtr&)>&& cb) {
         std::lock_guard<std::mutex> lk(ctrl_mutex_);
         if (session_) { session_->stop(); session_.reset(); }
+        flow_engine_->reset();
         Json::Value r; r["status"] = "stopped";
         cb(HttpResponse::newHttpJsonResponse(r));
     }
@@ -594,7 +635,7 @@ private:
             std::chrono::steady_clock::now().time_since_epoch()).count()
             - 3'600'000'000'000LL;
         auto c = detection_engine_->store().count_recent(since);
-        send_json(cb, {
+        send_json(cb, nlohmann::json{
             {"info",     c.info},
             {"warning",  c.warning},
             {"critical", c.critical},
@@ -609,7 +650,7 @@ private:
         auto dp = req->getParameter("duration_sec");
         if (!dp.empty()) { try { dur_sec = std::max(int64_t(1), (int64_t)std::stoll(dp)); } catch(...){} }
         detection_engine_->suppress(dur_sec * 1'000'000'000LL);
-        send_json(cb, {{"suppressed_for_sec", dur_sec},
+        send_json(cb, nlohmann::json{{"suppressed_for_sec", dur_sec},
                        {"is_suppressed", true}});
     }
 
@@ -627,13 +668,27 @@ private:
         try {
             auto cfg = nlohmann::json::parse(body);
             detection_engine_->set_detector_config(type, cfg);
-            send_json(cb, {{"status", "updated"}, {"detector", type}});
+            send_json(cb, nlohmann::json{{"status", "updated"}, {"detector", type}});
         } catch (const std::exception& e) {
             nlohmann::json err = {{"error", e.what()}};
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k400BadRequest);
             resp->setContentTypeCode(CT_APPLICATION_JSON);
             resp->setBody(err.dump());
+            cb(resp);
+        }
+    }
+
+    // ── GET /api/storage/status ──────────────────────────────────────────────
+    void getStorageStatus(const HttpRequestPtr& req,
+                          std::function<void(const HttpResponsePtr&)>&& cb) const {
+        if (storage_engine_) {
+            send_json(cb, storage_engine_->get_status());
+        } else {
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k503ServiceUnavailable);
+            resp->setContentTypeCode(CT_APPLICATION_JSON);
+            resp->setBody(nlohmann::json{{"error", "Storage Engine not configured (PG_DSN missing)"}}.dump());
             cb(resp);
         }
     }
@@ -647,6 +702,7 @@ private:
     std::unique_ptr<FlowEngine>     flow_engine_;
     std::unique_ptr<MetricsEngine>  metrics_engine_;
     std::unique_ptr<DetectionEngine>detection_engine_;
+    std::unique_ptr<storage::StorageEngine> storage_engine_;
     std::deque<nlohmann::json>      history_;
     std::deque<nlohmann::json>      closed_flows_;
 
@@ -659,3 +715,5 @@ private:
     std::atomic<uint64_t> proto_icmp_{0};
     std::atomic<uint64_t> proto_arp_{0};
 };
+
+int CaptureApi::num_instances = 0;

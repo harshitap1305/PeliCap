@@ -1,0 +1,18 @@
+# CMake / C++ build directories
+build/
+out/
+bin/
+
+# IDEs and configuration
+.idea/
+.vscode/
+cmake-build-debug/
+cmake-build-release/
+
+# Vcpkg
+vcpkg_installed/
+.vcpkg-root
+
+# Output data
+*.pcap
+*.pcapng
