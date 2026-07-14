@@ -22,6 +22,15 @@ void FlowEngine::stop() {
 
 void FlowEngine::reset() {
     stop();
+    // Flush all active flows before clearing
+    auto snapshot = table_.snapshot();
+    for (auto& f : snapshot) {
+        if (f && f->is_active) {
+            f->tcp_state = TcpFlowState::CLOSED;
+            f->is_active = false;
+            if (callback_) callback_(FlowEvent::CLOSED, f);
+        }
+    }
     table_.clear();
     next_flow_id_ = 1;
     start();
