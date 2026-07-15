@@ -8,6 +8,7 @@
     "boost-lockfree",
     "abseil",
     "libpq",
-    "libpqxx"
+    "libpqxx",
+    "re2"
   ]
 }

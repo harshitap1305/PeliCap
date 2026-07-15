@@ -22,8 +22,10 @@ public:
 
     uint64_t packets_captured() const { return packets_captured_.load(); }
     uint64_t packets_dropped() const { return packets_dropped_.load(); }
+    const std::string& get_session_id() const { return session_id_; }
 
 private:
+    std::string session_id_;
     static void onPacketArrives(pcpp::RawPacket* rawPacket, pcpp::PcapLiveDevice* dev, void* cookie);
 
     Config config_;

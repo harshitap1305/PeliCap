@@ -1,6 +1,7 @@
 #include "batch_writer.hpp"
 #include "../flow/flow.hpp"
 #include "../detection/alert.hpp"
+#include "storage_engine.hpp"
 #include <chrono>
 #include <iostream>
 #include <sstream>
@@ -9,10 +10,12 @@ namespace storage {
 
 // Helper: reclaim shared_ptr ownership from raw block pointer and cast to T.
 template<typename T>
-static std::shared_ptr<T> reclaim(void* shared_block) {
+static std::shared_ptr<T> reclaim(void*& shared_block) {
+    if (!shared_block) return nullptr;
     auto* heap = static_cast<std::shared_ptr<T>*>(shared_block);
     std::shared_ptr<T> result = std::move(*heap);
     delete heap;
+    shared_block = nullptr; // Nullify to prevent double-free on exception
     return result;
 }
 
@@ -61,11 +64,12 @@ void BatchWriter::run() {
 }
 
 void BatchWriter::flush_batch(std::vector<StorageEvent>& batch) {
-    std::vector<StorageEvent> flows, alerts, others;
+    std::vector<StorageEvent> flows, alerts, sessions, others;
     for (auto& ev : batch) {
         switch (ev.type) {
-            case EventType::FLOW_CLOSED:  flows.push_back(ev);  break;
-            case EventType::ALERT_FIRED:  alerts.push_back(ev); break;
+            case EventType::FLOW_CLOSED:     flows.push_back(ev);  break;
+            case EventType::ALERT_FIRED:     alerts.push_back(ev); break;
+            case EventType::SESSION_STARTED: sessions.push_back(ev); break;
             default:
                 // Free ownership for types we don't handle yet
                 if (ev.shared_block) {
@@ -79,19 +83,46 @@ void BatchWriter::flush_batch(std::vector<StorageEvent>& batch) {
     try {
         auto conn_proxy = pool_.acquire();
         pqxx::work tx(*conn_proxy);
+        if (!sessions.empty()) insert_sessions(tx, sessions);
         if (!flows.empty())  insert_flows(tx, flows);
         if (!alerts.empty()) insert_alerts(tx, alerts);
         tx.commit();
     } catch (const std::exception& e) {
         std::cerr << "[BatchWriter] flush_batch failed: " << e.what() << "\n";
         // Even on failure we must free the heap-allocated shared_ptrs
+        for (auto& ev : sessions) if (ev.shared_block) { delete static_cast<std::shared_ptr<StorageEngine::SessionStart>*>(ev.shared_block); }
         for (auto& ev : flows)  if (ev.shared_block) { delete static_cast<std::shared_ptr<Flow>*>(ev.shared_block); }
         for (auto& ev : alerts) if (ev.shared_block) { delete static_cast<std::shared_ptr<Alert>*>(ev.shared_block); }
     }
 }
 
-void BatchWriter::insert_flows(pqxx::work& tx, const std::vector<StorageEvent>& events) {
-    for (const auto& ev : events) {
+void BatchWriter::insert_sessions(pqxx::work& tx, std::vector<StorageEvent>& events) {
+    for (auto& ev : events) {
+        auto session = reclaim<StorageEngine::SessionStart>(ev.shared_block);
+        if (!session) continue;
+
+        try {
+            auto start_us = session->start_time_ns / 1000;
+            tx.exec(
+                "INSERT INTO capture_sessions "
+                "(session_id, start_time, interface_name, bpf_filter) "
+                "VALUES ($1, to_timestamp($2::bigint / 1000000.0), $3, $4) "
+                "ON CONFLICT (session_id) DO NOTHING",
+                pqxx::params{
+                    session->session_id,
+                    start_us,
+                    session->interface_name,
+                    session->bpf_filter
+                }
+            );
+        } catch (const std::exception& e) {
+            std::cerr << "[BatchWriter] insert_sessions row error: " << e.what() << "\n";
+        }
+    }
+}
+
+void BatchWriter::insert_flows(pqxx::work& tx, std::vector<StorageEvent>& events) {
+    for (auto& ev : events) {
         auto flow = reclaim<Flow>(ev.shared_block);
         if (!flow) continue;
 
@@ -106,10 +137,10 @@ void BatchWriter::insert_flows(pqxx::work& tx, const std::vector<StorageEvent>& 
                 "(flow_id, start_time, src_ip, dst_ip, src_port, dst_port, protocol, "
                 " interface_name, end_time, duration_ms, fwd_packets, rev_packets, "
                 " fwd_bytes, rev_bytes, payload_bytes, tcp_state, avg_rtt_us, min_rtt_us, "
-                " retransmit_count, zero_window_events, app_protocol, tls_sni, http_host, dns_query) "
+                " retransmit_count, zero_window_events, app_protocol, tls_sni, http_host, dns_query, session_id) "
                 "VALUES ($1, to_timestamp($2::bigint / 1000000.0), $3::inet, $4::inet, "
                 "  $5, $6, $7, $8, to_timestamp($9::bigint / 1000000.0), $10, "
-                "  $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24) "
+                "  $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25) "
                 "ON CONFLICT DO NOTHING",
                 pqxx::params{
                     (int64_t)flow->flow_id,
@@ -135,7 +166,8 @@ void BatchWriter::insert_flows(pqxx::work& tx, const std::vector<StorageEvent>& 
                     (int)static_cast<uint8_t>(flow->app_protocol),
                     flow->tls_sni,
                     flow->http_host,
-                    flow->dns_query
+                    flow->dns_query,
+                    flow->session_id
                 }
             );
         } catch (const std::exception& e) {
@@ -144,8 +176,8 @@ void BatchWriter::insert_flows(pqxx::work& tx, const std::vector<StorageEvent>& 
     }
 }
 
-void BatchWriter::insert_alerts(pqxx::work& tx, const std::vector<StorageEvent>& events) {
-    for (const auto& ev : events) {
+void BatchWriter::insert_alerts(pqxx::work& tx, std::vector<StorageEvent>& events) {
+    for (auto& ev : events) {
         auto alert = reclaim<Alert>(ev.shared_block);
         if (!alert) continue;
 
@@ -154,9 +186,9 @@ void BatchWriter::insert_alerts(pqxx::work& tx, const std::vector<StorageEvent>&
                 "INSERT INTO alerts "
                 "(alert_id, type, severity, timestamp_ns, title, description, "
                 " src_ip, dst_ip, domain, endpoint, observed_value, threshold_value, "
-                " baseline_value, correlation_id, is_ongoing) "
+                " baseline_value, correlation_id, is_ongoing, session_id) "
                 "VALUES ($1, $2, $3, $4, $5, $6, "
-                "  $7::inet, $8::inet, $9, $10, $11, $12, $13, $14, $15) "
+                "  $7::inet, $8::inet, $9, $10, $11, $12, $13, $14, $15, $16) "
                 "ON CONFLICT (alert_id) DO NOTHING",
                 pqxx::params{
                     (int64_t)alert->alert_id,
@@ -173,7 +205,8 @@ void BatchWriter::insert_alerts(pqxx::work& tx, const std::vector<StorageEvent>&
                     alert->context.threshold_value,
                     alert->context.baseline_value,
                     (int64_t)alert->correlation_id,
-                    alert->is_ongoing
+                    alert->is_ongoing,
+                    alert->session_id
                 }
             );
         } catch (const std::exception& e) {

@@ -59,6 +59,7 @@ public:
                           + " in " + std::to_string(f.duration_ns()/1'000'000'000LL)
                           + "s. Protocol: " + std::to_string(f.protocol)
                           + ". SNI: " + f.tls_sni;
+            a.session_id = f.session_id;
             a.context = ctx;
             fire(std::move(a), "large_flow:" + std::to_string(f.flow_id));
         }
@@ -81,6 +82,7 @@ public:
             a.description = "Connection open for "
                           + std::to_string(f.duration_ns()/60'000'000'000LL)
                           + " minutes. May indicate persistent tunnel or slow data leak.";
+            a.session_id = f.session_id;
             a.context = ctx;
             fire(std::move(a), "longlived:" + std::to_string(f.flow_id));
         }

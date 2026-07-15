@@ -20,6 +20,7 @@ ParsedPacket DissectorEngine::dissect(const CapturedPacket& raw) noexcept {
     out.captured_len  = raw.captured_len;
     out.original_len  = raw.original_len;
     out.interface_name= raw.interface_name;
+    out.session_id    = raw.session_id;
     out.is_truncated  = (raw.captured_len < raw.original_len);
 
     try {

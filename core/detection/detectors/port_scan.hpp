@@ -39,7 +39,8 @@ public:
     void on_new_flow(const std::string& src_ip,
                      const std::string& dst_ip,
                      uint16_t dst_port,
-                     int64_t  ts_ns)
+                     int64_t  ts_ns,
+                     const std::string& session_id)
     {
         if (!config_.enabled) return;
         std::lock_guard<std::mutex> lk(mtx_);
@@ -69,6 +70,7 @@ public:
                           + std::to_string(e.dst_ports.size())
                           + " distinct ports in under 60s. "
                           + "Consistent with automated port scanning. " + ctx.extra;
+            a.session_id = session_id;
             a.context = ctx;
             fire(std::move(a), "port_scan:" + src_ip);
             e.dst_ports.clear();
@@ -90,6 +92,7 @@ public:
                           + std::to_string(e.dst_hosts.size())
                           + " distinct hosts in under 60s. "
                           + "Consistent with network enumeration.";
+            a.session_id = session_id;
             a.context = ctx;
             fire(std::move(a), "host_scan:" + src_ip);
             e.dst_hosts.clear();

@@ -19,8 +19,9 @@ private:
     void run();
     void flush_batch(std::vector<StorageEvent>& batch);
     
-    void insert_flows(pqxx::work& tx, const std::vector<StorageEvent>& events);
-    void insert_alerts(pqxx::work& tx, const std::vector<StorageEvent>& events);
+    void insert_flows(pqxx::work& tx, std::vector<StorageEvent>& events);
+    void insert_alerts(pqxx::work& tx, std::vector<StorageEvent>& events);
+    void insert_sessions(pqxx::work& tx, std::vector<StorageEvent>& events);
 
     WriteQueue& queue_;
     PgConnectionPool& pool_;

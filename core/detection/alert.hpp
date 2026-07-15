@@ -95,6 +95,7 @@ struct Alert {
     bool           is_ongoing     = true;
     int64_t        resolved_at_ns = 0;   // 0 = still active
     uint64_t       correlation_id = 0;   // groups related concurrent alerts
+    std::string    session_id;
 
     nlohmann::json to_json() const {
         nlohmann::json j;
@@ -116,6 +117,7 @@ struct Alert {
         if (!context.extra.empty())    j["extra"]    = context.extra;
         if (context.flow_id > 0)       j["flow_id"]  = context.flow_id;
         if (correlation_id > 0)        j["correlation_id"] = correlation_id;
+        if (!session_id.empty())       j["session_id"] = session_id;
         return j;
     }
 };

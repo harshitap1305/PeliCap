@@ -39,6 +39,7 @@ public:
     void set_threshold(double t) { config_.static_threshold = t; }
     void set_sigma(double s)     { config_.sigma_multiplier = s; }
     void set_cooldown_ns(int64_t ns) { config_.cooldown_ns = ns; }
+    void set_session_id(const std::string& sid) { active_session_id_ = sid; }
 
     double current_baseline() const { return ewma_.get(); }
     double current_stddev()   const { return ewma_.stddev(); }
@@ -72,6 +73,9 @@ protected:
         alert.alert_id    = next_id_.fetch_add(1, std::memory_order_relaxed);
         alert.timestamp_ns = now;
         alert.is_ongoing  = true;
+        if (alert.session_id.empty()) {
+            alert.session_id = active_session_id_;
+        }
 
         store_.push(std::move(alert));
     }
@@ -96,6 +100,7 @@ protected:
     AlertStore&     store_;
     CooldownTracker& cooldown_;
     EwmaBaseline    ewma_;
+    std::string     active_session_id_;
 
 private:
     // inline static: C++17 — defined once across all TUs, no ODR violation

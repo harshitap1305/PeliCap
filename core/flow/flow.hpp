@@ -155,6 +155,7 @@ struct Flow {
     uint8_t     protocol = 0;
     bool        is_ipv6  = false;
     std::string interface_name;
+    std::string session_id;
 
     // ── Timing ───────────────────────────────────────────────────────────────
     int64_t start_time_ns = 0;  // first packet (packet timestamp)

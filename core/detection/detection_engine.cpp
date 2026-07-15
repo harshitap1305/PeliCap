@@ -179,7 +179,8 @@ void DetectionEngine::on_flow_event(FlowEvent event,
     if (event == FlowEvent::NEW) {
         port_scan_->on_new_flow(
             flow->src_ip_str, flow->dst_ip_str,
-            flow->dst_port,   flow->start_time_ns);
+            flow->dst_port,   flow->start_time_ns,
+            flow->session_id);
     }
 
     if (event == FlowEvent::CLOSED || event == FlowEvent::EXPIRED) {

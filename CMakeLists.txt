@@ -12,6 +12,7 @@ find_package(Boost REQUIRED COMPONENTS lockfree)
 find_package(absl CONFIG REQUIRED)
 find_package(PostgreSQL REQUIRED)
 find_package(libpqxx CONFIG REQUIRED)
+find_package(re2 CONFIG REQUIRED)
 
 add_executable(palicap
     core/capture/interface_discovery.cpp
@@ -27,6 +28,11 @@ add_executable(palicap
     core/storage/pcap_file_manager.cpp
     core/storage/retention/retention_manager.cpp
     core/storage/migrations/migration_runner.cpp
+    core/search/query/lexer.cpp
+    core/search/query/parser.cpp
+    core/search/query/field_registry.cpp
+    core/search/planner/query_planner.cpp
+    core/search/executor/search_executor.cpp
     api/capture_api.cpp
     main.cpp
 )
@@ -43,6 +49,7 @@ target_link_libraries(palicap PRIVATE
     absl::hash
     PostgreSQL::PostgreSQL
     libpqxx::pqxx
+    re2::re2
 )
 
 target_link_libraries(palicap PRIVATE Boost::lockfree)

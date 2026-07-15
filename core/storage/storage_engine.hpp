@@ -27,6 +27,14 @@ public:
     void write_alert(std::shared_ptr<Alert> alert_ptr);
     void write_metrics_snapshot(std::shared_ptr<void> metrics_ptr);
 
+    struct SessionStart {
+        std::string session_id;
+        int64_t start_time_ns;
+        std::string interface_name;
+        std::string bpf_filter;
+    };
+    void write_session_start(std::shared_ptr<SessionStart> session_ptr);
+
     // Direct PCAP write (called from hot packet path — no blocking)
     void write_raw_packet(const CapturedPacket& packet);
 
@@ -34,6 +42,8 @@ public:
     nlohmann::json query_flows(int limit = 50, int offset = 0);
     nlohmann::json query_metrics_history(const std::string& metric_name, const std::string& resolution = "1m");
     nlohmann::json get_status();
+
+    PgConnectionPool& get_pool() { return *pool_; }
 
 private:
     std::string pg_dsn_;
