@@ -229,6 +229,7 @@ struct ParsedPacket {
     uint32_t    captured_len  = 0;
     uint32_t    original_len  = 0;
     std::string interface_name;
+    std::string session_id;
     bool        is_truncated  = false; // captured_len < original_len
 
     // Layers — present only if found and parsed successfully

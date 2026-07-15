@@ -48,9 +48,21 @@ public:
     // Non-fatal: in-memory ring buffer continues if PG unavailable.
     void connect_postgres(const std::string& dsn);
 
-    // Start the 10-second metric evaluation tick thread.
     void start(const MetricsEngine& metrics);
     void stop();
+
+    void set_active_session_id(const std::string& sid) {
+        if (rexmit_) rexmit_->set_session_id(sid);
+        if (high_rtt_) high_rtt_->set_session_id(sid);
+        if (zero_win_) zero_win_->set_session_id(sid);
+        if (dns_lat_) dns_lat_->set_session_id(sid);
+        if (dns_nx_) dns_nx_->set_session_id(sid);
+        if (http_err_) http_err_->set_session_id(sid);
+        if (http_lat_) http_lat_->set_session_id(sid);
+        if (traffic_) traffic_->set_session_id(sid);
+        if (port_scan_) port_scan_->set_session_id(sid);
+        if (large_flow_) large_flow_->set_session_id(sid);
+    }
 
     // ── FlowEngine integration ────────────────────────────────────────────────
     // Called from FlowEngine's event callback (may be process or expiry thread).

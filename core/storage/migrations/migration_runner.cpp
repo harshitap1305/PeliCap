@@ -9,6 +9,18 @@ MigrationRunner::MigrationRunner(PgConnectionPool& pool) : pool_(pool) {
         "Initial schema",
         R"(
             CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+            CREATE EXTENSION IF NOT EXISTS pg_trgm CASCADE;
+
+            -- capture_sessions
+            CREATE TABLE IF NOT EXISTS capture_sessions (
+                session_id UUID PRIMARY KEY,
+                start_time TIMESTAMPTZ NOT NULL,
+                end_time TIMESTAMPTZ,
+                interface_name TEXT NOT NULL,
+                bpf_filter TEXT,
+                packets_captured BIGINT DEFAULT 0,
+                packets_dropped BIGINT DEFAULT 0
+            );
             
             -- flows
             CREATE TABLE IF NOT EXISTS flows (
@@ -16,8 +28,8 @@ MigrationRunner::MigrationRunner(PgConnectionPool& pool) : pool_(pool) {
                 start_time TIMESTAMPTZ NOT NULL,
                 src_ip INET,
                 dst_ip INET,
-                src_port SMALLINT,
-                dst_port SMALLINT,
+                src_port INTEGER,
+                dst_port INTEGER,
                 protocol SMALLINT,
                 interface_name TEXT,
                 end_time TIMESTAMPTZ,
@@ -37,6 +49,7 @@ MigrationRunner::MigrationRunner(PgConnectionPool& pool) : pool_(pool) {
                 http_host TEXT,
                 dns_query TEXT,
                 tags JSONB,
+                session_id UUID NOT NULL,
                 PRIMARY KEY (flow_id, start_time)
             );
 
@@ -45,8 +58,13 @@ MigrationRunner::MigrationRunner(PgConnectionPool& pool) : pool_(pool) {
 
             CREATE INDEX IF NOT EXISTS idx_flows_src_ip ON flows (src_ip, start_time DESC);
             CREATE INDEX IF NOT EXISTS idx_flows_dst_ip ON flows (dst_ip, start_time DESC);
-            CREATE INDEX IF NOT EXISTS idx_flows_tls_sni ON flows (tls_sni) WHERE tls_sni IS NOT NULL;
             CREATE INDEX IF NOT EXISTS idx_flows_dst_port ON flows (dst_port, start_time DESC);
+            CREATE INDEX IF NOT EXISTS idx_flows_session_id ON flows (session_id, start_time DESC);
+
+            -- Trigram indexes for fast ILIKE and Regex text search
+            CREATE INDEX IF NOT EXISTS idx_flows_tls_sni_trgm ON flows USING GIN (tls_sni gin_trgm_ops) WHERE tls_sni IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_flows_http_host_trgm ON flows USING GIN (http_host gin_trgm_ops) WHERE http_host IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_flows_dns_query_trgm ON flows USING GIN (dns_query gin_trgm_ops) WHERE dns_query IS NOT NULL;
 
             -- metrics
             CREATE TABLE IF NOT EXISTS metrics (
@@ -80,7 +98,8 @@ MigrationRunner::MigrationRunner(PgConnectionPool& pool) : pool_(pool) {
                 threshold_value DOUBLE PRECISION,
                 baseline_value DOUBLE PRECISION,
                 correlation_id BIGINT,
-                is_ongoing BOOLEAN
+                is_ongoing BOOLEAN,
+                session_id UUID NOT NULL
             );
 
             -- PCAP index
@@ -94,6 +113,15 @@ MigrationRunner::MigrationRunner(PgConnectionPool& pool) : pool_(pool) {
                 is_compressed BOOLEAN,
                 is_deleted BOOLEAN DEFAULT false
             );
+        )"
+    });
+    
+    migrations_.push_back({
+        2,
+        "Fix port types",
+        R"(
+            ALTER TABLE flows ALTER COLUMN src_port TYPE INTEGER;
+            ALTER TABLE flows ALTER COLUMN dst_port TYPE INTEGER;
         )"
     });
 }

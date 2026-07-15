@@ -12,6 +12,10 @@
 #include "detection/detection_engine.hpp"
 #include "alert_ws_controller.hpp"
 #include "storage/storage_engine.hpp"
+#include "search/query/lexer.hpp"
+#include "search/query/parser.hpp"
+#include "search/planner/query_planner.hpp"
+#include "search/executor/search_executor.hpp"
 #include <memory>
 #include <mutex>
 #include <deque>
@@ -74,7 +78,6 @@ public:
             auto* pp = new ParsedPacket(DissectorEngine::dissect(raw));
             if (!parsed_bus_->publish(pp)) {
                 parsed_dropped_++;
-                delete pp;
             }
         });
 
@@ -180,6 +183,8 @@ public:
     ADD_METHOD_TO(CaptureApi::suppressAlerts,      "/api/alerts/suppress",      Post);
     ADD_METHOD_TO(CaptureApi::getDetectors,        "/api/detectors",            Get);
     ADD_METHOD_TO(CaptureApi::setDetectorConfig,   "/api/detectors/{type}/config", Post);
+    // ── Search endpoints (Module 7) ───────────────────────────────────────────
+    ADD_METHOD_TO(CaptureApi::searchFlows,         "/api/search",               Post);
     METHOD_LIST_END
 
     // ── GET /api/test ────────────────────────────────────────────────────────
@@ -242,7 +247,23 @@ public:
         try {
             session_ = std::make_unique<CaptureSession>(cfg, *raw_bus_);
             session_->start();
+
+            if (storage_engine_) {
+                auto sess_start = std::make_shared<storage::StorageEngine::SessionStart>();
+                sess_start->session_id     = session_->get_session_id();
+                sess_start->start_time_ns  = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                std::chrono::system_clock::now().time_since_epoch()).count();
+                sess_start->interface_name = cfg.interface_name;
+                sess_start->bpf_filter     = cfg.bpf_filter;
+                storage_engine_->write_session_start(sess_start);
+            }
+
+            if (detection_engine_) {
+                detection_engine_->set_active_session_id(session_->get_session_id());
+            }
+
             Json::Value r; r["status"] = "started";
+            r["session_id"] = session_->get_session_id();
             cb(HttpResponse::newHttpJsonResponse(r));
         } catch (const std::exception& e) {
             Json::Value r; r["error"] = e.what();
@@ -689,6 +710,53 @@ private:
             resp->setStatusCode(k503ServiceUnavailable);
             resp->setContentTypeCode(CT_APPLICATION_JSON);
             resp->setBody(nlohmann::json{{"error", "Storage Engine not configured (PG_DSN missing)"}}.dump());
+            cb(resp);
+        }
+    }
+
+    // ── POST /api/search ──────────────────────────────────────────────────────
+    void searchFlows(const HttpRequestPtr& req,
+                     std::function<void(const HttpResponsePtr&)>&& cb) const {
+        if (!storage_engine_) {
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k503ServiceUnavailable);
+            resp->setBody(nlohmann::json{{"error", "Storage Engine not configured"}}.dump());
+            cb(resp);
+            return;
+        }
+
+        auto json = req->getJsonObject();
+        if (!json) {
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k400BadRequest);
+            cb(resp);
+            return;
+        }
+
+        std::string query_str = (*json).get("query", "").asString();
+        std::string session_id = (*json).get("session_id", "").asString();
+        int limit = (*json).get("limit", 50).asInt();
+        int offset = (*json).get("offset", 0).asInt();
+
+        try {
+            search::query::Lexer lexer(query_str);
+            auto tokens = lexer.tokenize();
+            
+            search::query::Parser parser(tokens);
+            auto ast = parser.parse();
+            
+            search::planner::QueryPlanner planner;
+            auto plan = planner.plan_flows_query(ast, session_id, limit, offset);
+            
+            search::executor::SearchExecutor executor(storage_engine_->get_pool());
+            nlohmann::json result = executor.execute(plan);
+            
+            send_json(cb, result);
+        } catch (const std::exception& e) {
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k400BadRequest);
+            resp->setContentTypeCode(CT_APPLICATION_JSON);
+            resp->setBody(nlohmann::json{{"error", e.what()}}.dump());
             cb(resp);
         }
     }

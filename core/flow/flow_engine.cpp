@@ -83,6 +83,7 @@ std::shared_ptr<Flow> FlowEngine::create_flow(const FlowKey& key,
     f->protocol       = key.protocol;
     f->is_ipv6        = key.is_ipv6;
     f->interface_name = pkt.interface_name;
+    f->session_id     = pkt.session_id;
     f->start_time_ns  = pkt.timestamp_ns;
     f->last_seen_ns   = pkt.timestamp_ns;
     f->app_protocol   = infer_app_protocol(pkt);

@@ -19,6 +19,7 @@ struct CapturedPacket {
     
     // Capture context
     std::string interface_name;
+    std::string session_id;
     int link_type;
     
     struct Parsed {

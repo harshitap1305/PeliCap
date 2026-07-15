@@ -9,7 +9,8 @@ enum class EventType {
     ALERT_FIRED,
     DNS_TRANSACTION,
     HTTP_TRANSACTION,
-    METRICS_SNAPSHOT
+    METRICS_SNAPSHOT,
+    SESSION_STARTED
 };
 
 // We store raw pointers in the lock-free queue because boost::lockfree requires

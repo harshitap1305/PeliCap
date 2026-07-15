@@ -58,14 +58,25 @@ void StorageEngine::stop() {
     if (retention_manager_) retention_manager_->stop();
 }
 
+void StorageEngine::write_session_start(std::shared_ptr<SessionStart> session_ptr) {
+    auto ev = make_event(EventType::SESSION_STARTED, std::move(session_ptr));
+    if (!queue_->push(ev)) {
+        delete static_cast<std::shared_ptr<SessionStart>*>(ev.shared_block);
+    }
+}
+
 void StorageEngine::write_flow(std::shared_ptr<Flow> flow_ptr) {
     auto ev = make_event(EventType::FLOW_CLOSED, std::move(flow_ptr));
-    queue_->push(ev);
+    if (!queue_->push(ev)) {
+        delete static_cast<std::shared_ptr<Flow>*>(ev.shared_block);
+    }
 }
 
 void StorageEngine::write_alert(std::shared_ptr<Alert> alert_ptr) {
     auto ev = make_event(EventType::ALERT_FIRED, std::move(alert_ptr));
-    queue_->push(ev);
+    if (!queue_->push(ev)) {
+        delete static_cast<std::shared_ptr<Alert>*>(ev.shared_block);
+    }
 }
 
 void StorageEngine::write_metrics_snapshot(std::shared_ptr<void> metrics_ptr) {
