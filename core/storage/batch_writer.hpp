@@ -22,6 +22,7 @@ private:
     void insert_flows(pqxx::work& tx, std::vector<StorageEvent>& events);
     void insert_alerts(pqxx::work& tx, std::vector<StorageEvent>& events);
     void insert_sessions(pqxx::work& tx, std::vector<StorageEvent>& events);
+    void insert_session_ends(pqxx::work& tx, std::vector<StorageEvent>& events);
 
     WriteQueue& queue_;
     PgConnectionPool& pool_;

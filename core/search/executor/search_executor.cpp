@@ -23,7 +23,7 @@ nlohmann::json SearchExecutor::execute(const planner::SqlPlan& plan) {
         }
         
         auto start_time = std::chrono::steady_clock::now();
-        pqxx::result r = tx.exec_params(plan.sql, p);
+        pqxx::result r = tx.exec(plan.sql, p);
         auto end_time = std::chrono::steady_clock::now();
         
         result["latency_ms"] = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();

@@ -29,17 +29,21 @@ public:
 
     struct SessionStart {
         std::string session_id;
+        std::string name;
+        std::string description;
         int64_t start_time_ns;
         std::string interface_name;
         std::string bpf_filter;
     };
     void write_session_start(std::shared_ptr<SessionStart> session_ptr);
+    void write_session_end(const std::string& session_id);
 
     // Direct PCAP write (called from hot packet path — no blocking)
     void write_raw_packet(const CapturedPacket& packet);
 
     // REST API query methods
-    nlohmann::json query_flows(int limit = 50, int offset = 0);
+    nlohmann::json get_sessions();
+    nlohmann::json query_flows(const std::string& session_id, int limit = 50, int offset = 0);
     nlohmann::json query_metrics_history(const std::string& metric_name, const std::string& resolution = "1m");
     nlohmann::json get_status();
 

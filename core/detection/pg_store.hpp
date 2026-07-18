@@ -40,10 +40,9 @@ public:
 
     bool is_connected() const { return connected_; }
 
-    // Insert one alert — called from AlertStore persistence callback.
-    // Non-fatal: prints a warning and returns false on failure.
     bool insert_alert(const Alert& a) {
         if (!conn_ || !connected_) return false;
+        if (a.session_id.empty()) return false; // Ignore alerts without session_id
 
         // Check connection is still alive, reconnect if needed
         if (PQstatus(conn_) != CONNECTION_OK) {
@@ -58,8 +57,8 @@ public:
             "INSERT INTO alerts "
             "(alert_id, type, severity, timestamp_ns, title, description, "
             " src_ip, dst_ip, domain, endpoint, observed_value, threshold_value, "
-            " baseline_value, correlation_id, is_ongoing) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) "
+            " baseline_value, correlation_id, is_ongoing, session_id) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) "
             "ON CONFLICT (alert_id) DO NOTHING";
 
         std::string alert_id_s   = std::to_string(a.alert_id);
@@ -72,7 +71,7 @@ public:
         std::string corr_s       = std::to_string(a.correlation_id);
         std::string ongoing_s    = a.is_ongoing ? "true" : "false";
 
-        const char* params[15] = {
+        const char* params[16] = {
             alert_id_s.c_str(),
             type_s.c_str(),
             severity_s.c_str(),
@@ -87,10 +86,11 @@ public:
             thr_s.c_str(),
             base_s.c_str(),
             corr_s.c_str(),
-            ongoing_s.c_str()
+            ongoing_s.c_str(),
+            a.session_id.c_str()
         };
 
-        PGresult* res = PQexecParams(conn_, sql, 15,
+        PGresult* res = PQexecParams(conn_, sql, 16,
                                      nullptr, params, nullptr, nullptr, 0);
 
         bool ok = (PQresultStatus(res) == PGRES_COMMAND_OK);

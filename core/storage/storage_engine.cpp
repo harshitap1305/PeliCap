@@ -65,6 +65,14 @@ void StorageEngine::write_session_start(std::shared_ptr<SessionStart> session_pt
     }
 }
 
+void StorageEngine::write_session_end(const std::string& session_id) {
+    auto session_ptr = std::make_shared<std::string>(session_id);
+    auto ev = make_event(EventType::SESSION_ENDED, std::move(session_ptr));
+    if (!queue_->push(ev)) {
+        delete static_cast<std::shared_ptr<std::string>*>(ev.shared_block);
+    }
+}
+
 void StorageEngine::write_flow(std::shared_ptr<Flow> flow_ptr) {
     auto ev = make_event(EventType::FLOW_CLOSED, std::move(flow_ptr));
     if (!queue_->push(ev)) {
@@ -99,15 +107,47 @@ void StorageEngine::write_raw_packet(const CapturedPacket& packet) {
     }
 }
 
-nlohmann::json StorageEngine::query_flows(int limit, int offset) {
+nlohmann::json StorageEngine::get_sessions() {
+    try {
+        auto conn = pool_->acquire();
+        pqxx::work tx(*conn);
+        auto res = tx.exec(
+            "SELECT session_id, name, description, start_time, end_time, "
+            "interface_name, packets_captured, packets_dropped "
+            "FROM capture_sessions ORDER BY start_time DESC"
+        );
+        nlohmann::json arr = nlohmann::json::array();
+        for (auto row : res) {
+            nlohmann::json j;
+            j["session_id"]       = row[0].is_null() ? "" : row[0].c_str();
+            j["name"]             = row[1].is_null() ? "" : row[1].c_str();
+            j["description"]      = row[2].is_null() ? "" : row[2].c_str();
+            j["start_time"]       = row[3].is_null() ? "" : row[3].c_str();
+            if (row[4].is_null()) {
+                j["end_time"] = nullptr;
+            } else {
+                j["end_time"] = row[4].c_str();
+            }
+            j["interface_name"]   = row[5].is_null() ? "" : row[5].c_str();
+            j["packets_captured"] = row[6].as<int64_t>(0);
+            j["packets_dropped"]  = row[7].as<int64_t>(0);
+            arr.push_back(j);
+        }
+        return arr;
+    } catch (const std::exception& e) {
+        return nlohmann::json{{"error", e.what()}};
+    }
+}
+
+nlohmann::json StorageEngine::query_flows(const std::string& session_id, int limit, int offset) {
     try {
         auto conn = pool_->acquire();
         pqxx::work tx(*conn);
         auto res = tx.exec(
             "SELECT flow_id, src_ip::text, dst_ip::text, src_port, dst_port, "
             "protocol, start_time, end_time, duration_ms, fwd_bytes, rev_bytes "
-            "FROM flows ORDER BY start_time DESC LIMIT $1 OFFSET $2",
-            pqxx::params{limit, offset}
+            "FROM flows WHERE session_id = $1 ORDER BY start_time DESC LIMIT $2 OFFSET $3",
+            pqxx::params{session_id, limit, offset}
         );
         nlohmann::json arr = nlohmann::json::array();
         for (auto row : res) {

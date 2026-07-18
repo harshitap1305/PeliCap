@@ -21,7 +21,6 @@ MigrationRunner::MigrationRunner(PgConnectionPool& pool) : pool_(pool) {
                 packets_captured BIGINT DEFAULT 0,
                 packets_dropped BIGINT DEFAULT 0
             );
-            
             -- flows
             CREATE TABLE IF NOT EXISTS flows (
                 flow_id BIGINT,
@@ -122,6 +121,15 @@ MigrationRunner::MigrationRunner(PgConnectionPool& pool) : pool_(pool) {
         R"(
             ALTER TABLE flows ALTER COLUMN src_port TYPE INTEGER;
             ALTER TABLE flows ALTER COLUMN dst_port TYPE INTEGER;
+        )"
+    });
+
+    migrations_.push_back({
+        3,
+        "Add name and description to capture_sessions",
+        R"(
+            ALTER TABLE capture_sessions ADD COLUMN IF NOT EXISTS name TEXT;
+            ALTER TABLE capture_sessions ADD COLUMN IF NOT EXISTS description TEXT;
         )"
     });
 }
