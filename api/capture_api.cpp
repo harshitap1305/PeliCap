@@ -11,6 +11,7 @@
 #include "metrics/metrics_engine.hpp"
 #include "detection/detection_engine.hpp"
 #include "alert_ws_controller.hpp"
+#include "metrics_ws_controller.hpp"
 #include "storage/storage_engine.hpp"
 #include "search/query/lexer.hpp"
 #include "search/query/parser.hpp"
@@ -139,6 +140,18 @@ public:
         flow_engine_->start();
         metrics_engine_->start_housekeeping();
         detection_engine_->start(*metrics_engine_);
+
+        // ── Broadcast metrics every second ────────────────────────────────────
+        drogon::app().getLoop()->runEvery(1.0, [this]() {
+            if (session_) { // Only broadcast if capturing
+                auto summary = metrics_engine_->get_summary();
+                // Add some top-level capture stats
+                summary["active_flows"] = (Json::UInt64)flow_engine_->active_flows();
+                summary["packets_captured"] = (Json::UInt64)session_->packets_captured();
+                summary["packets_dropped"] = (Json::UInt64)session_->packets_dropped();
+                MetricsWsController::broadcast(summary);
+            }
+        });
     }
 
     ~CaptureApi() {
@@ -161,6 +174,7 @@ public:
     ADD_METHOD_TO(CaptureApi::getInterfaces,      "/api/interfaces",           Get);
     ADD_METHOD_TO(CaptureApi::startCapture,       "/api/capture/start",        Post);
     ADD_METHOD_TO(CaptureApi::stopCapture,        "/api/capture/stop",         Post);
+    ADD_METHOD_TO(CaptureApi::getSessions,        "/api/sessions",             Get);
     ADD_METHOD_TO(CaptureApi::getStats,           "/api/stats",                Get);
     ADD_METHOD_TO(CaptureApi::getPackets,         "/api/packets",              Get);
     ADD_METHOD_TO(CaptureApi::getPacketStats,     "/api/packets/stats",        Get);
@@ -251,6 +265,8 @@ public:
             if (storage_engine_) {
                 auto sess_start = std::make_shared<storage::StorageEngine::SessionStart>();
                 sess_start->session_id     = session_->get_session_id();
+                sess_start->name           = (*json).get("name", "").asString();
+                sess_start->description    = (*json).get("description", "").asString();
                 sess_start->start_time_ns  = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                                 std::chrono::system_clock::now().time_since_epoch()).count();
                 sess_start->interface_name = cfg.interface_name;
@@ -277,10 +293,32 @@ public:
     void stopCapture(const HttpRequestPtr& req,
                      std::function<void(const HttpResponsePtr&)>&& cb) {
         std::lock_guard<std::mutex> lk(ctrl_mutex_);
-        if (session_) { session_->stop(); session_.reset(); }
+        if (session_) {
+            if (storage_engine_) {
+                storage_engine_->write_session_end(session_->get_session_id());
+            }
+            session_->stop(); 
+            session_.reset(); 
+        }
         flow_engine_->reset();
         Json::Value r; r["status"] = "stopped";
         cb(HttpResponse::newHttpJsonResponse(r));
+    }
+
+    // ── GET /api/sessions ────────────────────────────────────────────────────
+    void getSessions(const HttpRequestPtr& req,
+                     std::function<void(const HttpResponsePtr&)>&& cb) const {
+        if (!storage_engine_) {
+            auto r = HttpResponse::newHttpResponse();
+            r->setStatusCode(k500InternalServerError);
+            cb(r); return;
+        }
+        auto j = storage_engine_->get_sessions();
+        auto resp = HttpResponse::newHttpResponse();
+        resp->setStatusCode(k200OK);
+        resp->setContentTypeCode(CT_APPLICATION_JSON);
+        resp->setBody(j.dump());
+        cb(resp);
     }
 
     // ── GET /api/stats ───────────────────────────────────────────────────────
@@ -622,6 +660,8 @@ private:
         size_t n = 100;
         auto np = req->getParameter("n");
         if (!np.empty()) { try { n = std::min((size_t)std::stoul(np), size_t(1000)); } catch(...){} }
+        auto lp = req->getParameter("limit");
+        if (!lp.empty()) { try { n = std::min((size_t)std::stoul(lp), size_t(1000)); } catch(...){} }
 
         AlertSeverity min_sev = AlertSeverity::INFO;
         auto sevp = req->getParameter("severity");
@@ -629,11 +669,12 @@ private:
         if (sevp == "CRITICAL") min_sev = AlertSeverity::CRITICAL;
 
         auto typep = req->getParameter("type");
+        auto session_id_filter = req->getParameter("session_id");
+
         std::vector<Alert> alerts;
 
         // type filter — search by AlertType name
         if (!typep.empty()) {
-            // Walk all alerts and match by type string
             auto all = detection_engine_->store().recent(10000, AlertSeverity::INFO);
             for (auto& a : all)
                 if (std::string(alert_type_str(a.type)) == typep)
@@ -643,10 +684,21 @@ private:
             alerts = detection_engine_->store().recent(n, min_sev);
         }
 
+        // Filter by session_id if provided
+        if (!session_id_filter.empty()) {
+            std::vector<Alert> scoped;
+            scoped.reserve(alerts.size());
+            for (auto& a : alerts)
+                if (a.session_id == session_id_filter)
+                    scoped.push_back(a);
+            alerts = std::move(scoped);
+        }
+
         nlohmann::json j = nlohmann::json::array();
         for (auto& a : alerts) j.push_back(a.to_json());
         send_json(cb, j);
     }
+
 
     // ── GET /api/alerts/count ────────────────────────────────────────────────
     void getAlertCount(const HttpRequestPtr& req,
@@ -739,12 +791,15 @@ private:
         int offset = (*json).get("offset", 0).asInt();
 
         try {
-            search::query::Lexer lexer(query_str);
-            auto tokens = lexer.tokenize();
-            
-            search::query::Parser parser(tokens);
-            auto ast = parser.parse();
-            
+            // Parse the query (skip lexer/parser for empty string — null AST → no extra WHERE clause)
+            search::query::AstNodePtr ast = nullptr;
+            if (!query_str.empty()) {
+                search::query::Lexer lexer(query_str);
+                auto tokens = lexer.tokenize();
+                search::query::Parser parser(tokens);
+                ast = parser.parse();
+            }
+
             search::planner::QueryPlanner planner;
             auto plan = planner.plan_flows_query(ast, session_id, limit, offset);
             

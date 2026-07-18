@@ -6,6 +6,7 @@
 #include "dns_transaction_tracker.hpp"
 #include "../flow/flow_engine.hpp"
 #include <nlohmann/json.hpp>
+#include <json/json.h>
 #include <thread>
 #include <atomic>
 #include <memory>
@@ -204,6 +205,18 @@ public:
             se.push_back({{"endpoint", http.slowest_endpoints[i].key},
                           {"avg_ms",   http.slowest_endpoints[i].avg}});
 
+        return j;
+    }
+
+    // ── WebSocket metrics summary (Json::Value) ─────────────────────────────────
+    Json::Value get_summary(size_t window_sec = 1) const {
+        auto net = network_.snapshot(window_sec);
+        Json::Value j;
+        j["bw_in"] = net.bytes_in_per_sec * 8.0 / 1000000.0; // Mbps
+        j["bw_out"] = net.bytes_out_per_sec * 8.0 / 1000000.0; // Mbps
+        j["pps"] = (Json::UInt64)net.packets_per_sec;
+        j["active_flows"] = (Json::UInt64)net.active_flows;
+        j["packet_loss"] = 0.0; // Calculate later if needed
         return j;
     }
 

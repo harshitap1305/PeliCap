@@ -64,12 +64,13 @@ void BatchWriter::run() {
 }
 
 void BatchWriter::flush_batch(std::vector<StorageEvent>& batch) {
-    std::vector<StorageEvent> flows, alerts, sessions, others;
+    std::vector<StorageEvent> flows, alerts, sessions, session_ends, others;
     for (auto& ev : batch) {
         switch (ev.type) {
             case EventType::FLOW_CLOSED:     flows.push_back(ev);  break;
             case EventType::ALERT_FIRED:     alerts.push_back(ev); break;
             case EventType::SESSION_STARTED: sessions.push_back(ev); break;
+            case EventType::SESSION_ENDED:   session_ends.push_back(ev); break;
             default:
                 // Free ownership for types we don't handle yet
                 if (ev.shared_block) {
@@ -84,6 +85,7 @@ void BatchWriter::flush_batch(std::vector<StorageEvent>& batch) {
         auto conn_proxy = pool_.acquire();
         pqxx::work tx(*conn_proxy);
         if (!sessions.empty()) insert_sessions(tx, sessions);
+        if (!session_ends.empty()) insert_session_ends(tx, session_ends);
         if (!flows.empty())  insert_flows(tx, flows);
         if (!alerts.empty()) insert_alerts(tx, alerts);
         tx.commit();
@@ -91,6 +93,7 @@ void BatchWriter::flush_batch(std::vector<StorageEvent>& batch) {
         std::cerr << "[BatchWriter] flush_batch failed: " << e.what() << "\n";
         // Even on failure we must free the heap-allocated shared_ptrs
         for (auto& ev : sessions) if (ev.shared_block) { delete static_cast<std::shared_ptr<StorageEngine::SessionStart>*>(ev.shared_block); }
+        for (auto& ev : session_ends) if (ev.shared_block) { delete static_cast<std::shared_ptr<std::string>*>(ev.shared_block); }
         for (auto& ev : flows)  if (ev.shared_block) { delete static_cast<std::shared_ptr<Flow>*>(ev.shared_block); }
         for (auto& ev : alerts) if (ev.shared_block) { delete static_cast<std::shared_ptr<Alert>*>(ev.shared_block); }
     }
@@ -105,11 +108,13 @@ void BatchWriter::insert_sessions(pqxx::work& tx, std::vector<StorageEvent>& eve
             auto start_us = session->start_time_ns / 1000;
             tx.exec(
                 "INSERT INTO capture_sessions "
-                "(session_id, start_time, interface_name, bpf_filter) "
-                "VALUES ($1, to_timestamp($2::bigint / 1000000.0), $3, $4) "
+                "(session_id, name, description, start_time, interface_name, bpf_filter) "
+                "VALUES ($1, $2, $3, to_timestamp($4::bigint / 1000000.0), $5, $6) "
                 "ON CONFLICT (session_id) DO NOTHING",
                 pqxx::params{
                     session->session_id,
+                    session->name,
+                    session->description,
                     start_us,
                     session->interface_name,
                     session->bpf_filter
@@ -117,6 +122,22 @@ void BatchWriter::insert_sessions(pqxx::work& tx, std::vector<StorageEvent>& eve
             );
         } catch (const std::exception& e) {
             std::cerr << "[BatchWriter] insert_sessions row error: " << e.what() << "\n";
+        }
+    }
+}
+
+void BatchWriter::insert_session_ends(pqxx::work& tx, std::vector<StorageEvent>& events) {
+    for (auto& ev : events) {
+        auto session_id_ptr = reclaim<std::string>(ev.shared_block);
+        if (!session_id_ptr) continue;
+
+        try {
+            tx.exec(
+                "UPDATE capture_sessions SET end_time = NOW() WHERE session_id = $1",
+                pqxx::params{*session_id_ptr}
+            );
+        } catch (const std::exception& e) {
+            std::cerr << "[BatchWriter] insert_session_ends row error: " << e.what() << "\n";
         }
     }
 }
@@ -180,6 +201,13 @@ void BatchWriter::insert_alerts(pqxx::work& tx, std::vector<StorageEvent>& event
     for (auto& ev : events) {
         auto alert = reclaim<Alert>(ev.shared_block);
         if (!alert) continue;
+        if (alert->session_id.empty()) continue; // Drop alerts with no session
+
+        std::optional<std::string> src_ip_opt;
+        if (!alert->context.src_ip.empty()) src_ip_opt = alert->context.src_ip;
+
+        std::optional<std::string> dst_ip_opt;
+        if (!alert->context.dst_ip.empty()) dst_ip_opt = alert->context.dst_ip;
 
         try {
             tx.exec(
@@ -197,8 +225,8 @@ void BatchWriter::insert_alerts(pqxx::work& tx, std::vector<StorageEvent>& event
                     alert->timestamp_ns,
                     alert->title,
                     alert->description,
-                    alert->context.src_ip.empty()   ? pqxx::zview{} : pqxx::zview{alert->context.src_ip},
-                    alert->context.dst_ip.empty()   ? pqxx::zview{} : pqxx::zview{alert->context.dst_ip},
+                    src_ip_opt,
+                    dst_ip_opt,
                     alert->context.domain,
                     alert->context.endpoint,
                     alert->context.observed_value,
