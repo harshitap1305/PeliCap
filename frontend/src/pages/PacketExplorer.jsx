@@ -124,17 +124,50 @@ const PacketExplorer = () => {
   const parentRef = useRef(null);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['packets', sessionId],
+    queryKey: ['packets', sessionId, isCapturing],
     queryFn: async () => {
       if (!sessionId) return { packets: [] };
-      const res = await api.get('/api/packets?limit=5000');
-      return res.data;
+      if (isCapturing) {
+        // Live: use in-memory packet ring buffer
+        const res = await api.get('/api/packets?limit=5000');
+        return res.data;
+      } else {
+        // Historical: /api/packets is empty (in-memory only).
+        // Fall back to searching stored flows from PostgreSQL.
+        const res = await api.post('/api/search', {
+          session_id: sessionId,
+          query: '',
+          limit: 2000,
+          offset: 0,
+        });
+        // Convert flow records to a packet-like structure the rest of the
+        // component can render (the filter and detail panel will still work).
+        const flows = res.data?.results || [];
+        const packets = flows.map(f => ({
+          timestamp_ns: f.start_time ? new Date(f.start_time).getTime() * 1_000_000 : 0,
+          length: (f.fwd_bytes || 0) + (f.rev_bytes || 0),
+          payload_bytes: f.payload_bytes,
+          ip: { src: f.src_ip, dst: f.dst_ip },
+          // Synthesise protocol fields so matchesFilter works
+          tcp: f.protocol === 6 ? { src_port: f.src_port, dst_port: f.dst_port } : undefined,
+          udp: f.protocol === 17 ? { src_port: f.src_port, dst_port: f.dst_port } : undefined,
+          dns: f.app_protocol === 'DNS' ? { query: f.dns_query, is_response: false } : undefined,
+          tls: f.tls_sni ? { sni: f.tls_sni } : undefined,
+          http: f.http_host ? { method: 'GET', url: f.http_host } : undefined,
+          app_protocol: f.app_protocol,
+          // Keep original flow data for detail panel
+          _flow: f,
+          _isFlow: true,
+        }));
+        return { packets, _isHistorical: true };
+      }
     },
     refetchInterval: isCapturing ? 2000 : false,
     enabled: !!sessionId,
   });
 
   const allPackets = data?.packets || [];
+  const isHistorical = !!data?._isHistorical;
 
   // Client-side filter applied only when user clicks "Apply Filter"
   const packets = useMemo(() => {
@@ -169,11 +202,14 @@ const PacketExplorer = () => {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">Packet Explorer</h1>
           <p className="text-slate-500 mt-1">
-            Deep inspection of raw packets
-            {!isCapturing && ' — showing last captured packets'}
+            {isCapturing
+              ? 'Deep inspection of raw packets'
+              : isHistorical
+                ? 'Historical mode — showing stored flows (raw packets not persisted)'
+                : 'Deep inspection of raw packets'}
             {activeFilter && (
               <span className="ml-2 text-indigo-600">
-                · {packets.length} of {allPackets.length} packets match
+                · {packets.length} of {allPackets.length} records match
               </span>
             )}
           </p>

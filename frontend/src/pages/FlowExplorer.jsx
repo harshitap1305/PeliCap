@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { ProtocolBadge, Badge } from '../components/ui/Badge';
-import { Search, Filter, ArrowRight, Download, Server, Layers } from 'lucide-react';
+import { Search, Filter, ArrowRight, Download, Server, Layers, Sparkles, X } from 'lucide-react';
 import { useCaptureStore } from '../store/captureStore';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
@@ -48,13 +48,44 @@ const EmptySessionState = ({ navigate }) => (
   </div>
 );
 
+// Maps human-friendly shorthand to search engine query syntax
+const normalizeQuery = (q) => {
+  const trimmed = q.trim();
+  if (!trimmed) return '';
+  const lower = trimmed.toLowerCase();
+  // Protocol shorthands → proper field syntax
+  if (lower === 'tcp') return 'protocol:TCP';
+  if (lower === 'udp') return 'protocol:UDP';
+  if (lower === 'dns') return 'protocol:DNS';
+  if (lower === 'icmp') return 'protocol:ICMP';
+  if (lower === 'http') return 'protocol:HTTP';
+  if (lower === 'tls' || lower === 'https') return 'protocol:TLS';
+  // Already looks like a field:value query — pass through
+  return trimmed;
+};
+
 const FlowExplorer = () => {
   const { sessionId, isCapturing } = useCaptureStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const [search, setSearch] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
   const [page, setPage] = useState(0);
   const limit = 50;
+  const [aiFlow, setAiFlow] = useState(null);
+  const [aiExplanation, setAiExplanation] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+
+  // Pre-fill search from AI Copilot chip navigation
+  useEffect(() => {
+    if (location.state?.searchQuery) {
+      const q = location.state.searchQuery;
+      setSearch(q);
+      setSubmittedQuery(normalizeQuery(q));
+      // Clear state so it doesn't re-trigger on back navigation
+      window.history.replaceState({}, '');
+    }
+  }, [location.state]);
 
   // Auto-load on mount: query fires immediately with empty string
   const { data: result, isLoading, refetch } = useQuery({
@@ -79,7 +110,21 @@ const FlowExplorer = () => {
   const handleSearch = (e) => {
     e.preventDefault();
     setPage(0);
-    setSubmittedQuery(search);
+    setSubmittedQuery(normalizeQuery(search));
+  };
+
+  const handleAiAnalyze = async (flow) => {
+    setAiFlow(flow);
+    setAiExplanation('');
+    setAiLoading(true);
+    try {
+      const res = await api.post('/ai/explain-flow', { flow, session_id: sessionId });
+      setAiExplanation(res.data?.explanation || 'No explanation returned.');
+    } catch (e) {
+      setAiExplanation('AI analysis failed. Make sure the AI service is running.');
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   if (!sessionId) return <EmptySessionState navigate={navigate} />;
@@ -165,6 +210,17 @@ const FlowExplorer = () => {
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-500">
                     {flow.duration_ms != null ? `${(flow.duration_ms / 1000).toFixed(2)}s` : '—'}
                   </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <button
+                      onClick={() => handleAiAnalyze(flow)}
+                      className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800
+                                 px-2 py-1 rounded hover:bg-indigo-50 transition-colors"
+                      title="Analyze with AI"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      AI
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -200,6 +256,45 @@ const FlowExplorer = () => {
           </div>
         </div>
       </Card>
+
+      {/* AI Explain Flow Modal */}
+      {aiFlow && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-indigo-500" />
+                <span className="font-semibold text-slate-900">AI Flow Analysis</span>
+              </div>
+              <button onClick={() => { setAiFlow(null); setAiExplanation(''); }}
+                className="text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4">
+              <div className="text-xs font-mono text-slate-500 mb-3">
+                {aiFlow.src_ip}:{aiFlow.src_port} → {aiFlow.dst_ip}:{aiFlow.dst_port}
+                {(aiFlow.tls_sni || aiFlow.http_host) && <span className="ml-2 text-indigo-600">({aiFlow.tls_sni || aiFlow.http_host})</span>}
+              </div>
+              {aiLoading
+                ? <div className="flex items-center gap-2 text-sm text-slate-500 py-6 justify-center">
+                    <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                    Analyzing with Groq...
+                  </div>
+                : <p className="text-sm text-slate-700 leading-relaxed">{aiExplanation}</p>
+              }
+            </div>
+            <div className="px-5 py-3 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => { setAiFlow(null); setAiExplanation(''); }}
+                className="px-4 py-1.5 text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

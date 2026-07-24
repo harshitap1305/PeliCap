@@ -15,6 +15,11 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'      # max 1.5 cores (it's mostly I/O bound during capture)
+          memory: 512M
 
   postgres:
     image: timescale/timescaledb:latest-pg16
@@ -23,8 +28,27 @@ services:
       POSTGRES_USER: palicap
       POSTGRES_PASSWORD: palicap
       POSTGRES_DB: palicap
-      PGPORT: 5434     
-    command: ["postgres", "-c", "shared_preload_libraries=timescaledb"]
+      PGPORT: 5434
+    # Override timescaledb_tune's aggressive server settings with laptop-friendly values.
+    # timescaledb_tune auto-detected 15GB RAM / 16 CPUs and configured 3.9GB shared_buffers
+    # and 35 background workers — totally wrong for a dev laptop sharing resources.
+    command: >
+      postgres
+      -c shared_preload_libraries=timescaledb
+      -c shared_buffers=256MB
+      -c effective_cache_size=768MB
+      -c maintenance_work_mem=64MB
+      -c work_mem=4MB
+      -c max_worker_processes=4
+      -c max_parallel_workers=2
+      -c max_parallel_workers_per_gather=1
+      -c timescaledb.max_background_workers=2
+      -c autovacuum_max_workers=2
+      -c autovacuum_naptime=60
+      -c wal_buffers=16MB
+      -c checkpoint_completion_target=0.9
+      -c random_page_cost=1.1
+      -c jit=off
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -33,6 +57,30 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'      # DB is I/O bound — 1 core is plenty for dev
+          memory: 512M
+
+  ai_service:
+    build:
+      context: ./ai_service
+      dockerfile: Dockerfile
+    network_mode: "host"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - BACKEND_URL=http://localhost:8080
+      - PG_DSN=postgresql://palicap:palicap@localhost:5434/palicap
+    depends_on:
+      - palicap
+      - postgres
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'      # Mostly idle; CPU spikes only on LLM response parsing
+          memory: 256M
 
   frontend:
     build:
@@ -43,10 +91,17 @@ services:
       - NODE_ENV=development
     depends_on:
       - palicap
+      - ai_service
     restart: unless-stopped
     volumes:
-      - ./frontend:/app
+      - ./frontend/src:/app/src        # only watch src/, not node_modules or dist
+      - ./frontend/public:/app/public
       - /app/node_modules
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'      # Vite esbuild can spike on rebuild; 1 core is enough
+          memory: 512M
 
 volumes:
   pg_data:
