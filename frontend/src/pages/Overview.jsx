@@ -12,7 +12,9 @@ import {
   Zap,
   ArrowRight,
   Server,
-  Layers
+  Layers,
+  Sparkles,
+  Lightbulb
 } from 'lucide-react';
 import {
   LineChart,
@@ -85,11 +87,11 @@ const Overview = () => {
   const navigate = useNavigate();
   const [bwData, setBwData] = useState([]);
 
-  // Live stats (packets, flows)
+  // Live stats (packets, flows) — only poll when actively capturing
   const { data: stats } = useQuery({
     queryKey: ['stats'],
     queryFn: () => api.get('/api/stats').then(r => r.data),
-    refetchInterval: isCapturing ? 2000 : false,
+    refetchInterval: isCapturing ? 5000 : false,  // 5s is enough for a dev dashboard
     enabled: isCapturing,
   });
 
@@ -97,8 +99,8 @@ const Overview = () => {
   const { data: netMetrics } = useQuery({
     queryKey: ['metrics-network', sessionId],
     queryFn: () => api.get('/api/metrics/network?window=60').then(r => r.data),
-    refetchInterval: isCapturing ? 3000 : false,
-    enabled: !!sessionId,
+    refetchInterval: isCapturing ? 8000 : false,  // bandwidth chart updates every 8s
+    enabled: !!sessionId && isCapturing,           // skip entirely for historical sessions
   });
 
   // Session info (always fetch fresh — needed for historical stats)
@@ -147,6 +149,37 @@ const Overview = () => {
     enabled: !!sessionId,
   });
 
+  // AI auto-analysis — only for live sessions (historical data is static, no need to poll)
+  const { data: aiAnalysis } = useQuery({
+    queryKey: ['ai-auto-analyze', sessionId, isCapturing],
+    queryFn: () =>
+      axios.post('/ai/auto-analyze', { session_id: sessionId, is_live: isCapturing }).then(r => r.data),
+    enabled: !!sessionId && isCapturing,  // historical sessions: no LLM polling
+    refetchInterval: 5 * 60 * 1000,
+    retry: false,
+    staleTime: 4 * 60 * 1000,
+  });
+
+  // Historical session aggregate stats from PostgreSQL (packets, alerts, protocol breakdown)
+  const { data: historicalStats } = useQuery({
+    queryKey: ['hist-session-summary', sessionId],
+    queryFn: () =>
+      axios.get(`/ai/history/session-summary?session_id=${sessionId}`).then(r => r.data),
+    enabled: !!sessionId && !isCapturing,
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  // Historical alerts count from PostgreSQL
+  const { data: historicalAlerts = [] } = useQuery({
+    queryKey: ['hist-alerts', sessionId],
+    queryFn: () =>
+      axios.get(`/ai/history/alerts?session_id=${sessionId}&limit=500`).then(r => r.data),
+    enabled: !!sessionId && !isCapturing,
+    staleTime: 60_000,
+    retry: false,
+  });
+
   // WebSocket for live bandwidth chart
   useEffect(() => {
     if (!isCapturing) return;
@@ -175,10 +208,10 @@ const Overview = () => {
     return () => ws.close();
   }, [isCapturing]);
 
-  // Derive displayed stats
+  // Derive displayed stats — prefer PostgreSQL data for historical sessions
   const packetsCapt = isCapturing
     ? (stats?.packets_captured ?? 0)
-    : (historicalSession?.packets_captured ?? '—');
+    : (historicalSession?.packets_captured || historicalStats?.total_packets || '—');
 
   const packetsDropped = isCapturing
     ? (stats?.packets_dropped ?? 0)
@@ -186,12 +219,20 @@ const Overview = () => {
 
   const activeFlows = isCapturing
     ? (stats?.active_flows ?? 0)
-    : (flowCountData ?? topFlows.length ?? '—');
+    : (historicalStats?.total_flows ?? flowCountData ?? topFlows.length ?? '—');
 
   const bwIn = netMetrics ? (netMetrics.bps_in / 1e6).toFixed(2) : null;
   const bwOut = netMetrics ? (netMetrics.bps_out / 1e6).toFixed(2) : null;
 
-  const alertCount = Array.isArray(alertsData) ? alertsData.length : 0;
+  // Alert count: for historical use PostgreSQL count; for live use in-memory
+  const alertCount = !isCapturing && historicalStats
+    ? (historicalStats.alerts?.total ?? 0)
+    : (Array.isArray(alertsData) ? alertsData.length : 0);
+
+  // For historical alerts panel, use PostgreSQL alerts
+  const displayedAlerts = !isCapturing && historicalAlerts.length > 0
+    ? historicalAlerts
+    : alertsData;
 
   // Duration for historical session
   const sessionDuration = historicalSession?.start_time && historicalSession?.end_time
@@ -218,6 +259,23 @@ const Overview = () => {
           </p>
         </div>
       </div>
+
+      {/* AI Insights card */}
+      {aiAnalysis?.summary && (
+        <div className="flex items-start gap-3 bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3">
+          <Sparkles className="w-4 h-4 text-indigo-500 mt-0.5 shrink-0" />
+          <div>
+            <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">AI Insight</span>
+            <p className="text-sm text-indigo-900 mt-0.5">{aiAnalysis.summary}</p>
+          </div>
+          <button
+            onClick={() => navigate('/copilot')}
+            className="ml-auto shrink-0 text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1"
+          >
+            Ask more <ArrowRight className="w-3 h-3" />
+          </button>
+        </div>
+      )}
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
@@ -303,11 +361,11 @@ const Overview = () => {
             <div className="p-4 border-b border-slate-200">
               <h3 className="text-sm font-semibold text-slate-900">Recent Alerts</h3>
             </div>
-            {!Array.isArray(alertsData) || alertsData.length === 0 ? (
+            {!Array.isArray(displayedAlerts) || displayedAlerts.length === 0 ? (
               <div className="p-8 text-center text-slate-400 text-sm">No alerts for this session.</div>
             ) : (
               <div className="divide-y divide-slate-100">
-                {alertsData.slice(0, 6).map((a, i) => {
+                {displayedAlerts.slice(0, 6).map((a, i) => {
                   const sev = (a.severity || '').toUpperCase();
                   const color = sev === 'CRITICAL' ? 'text-red-600' : sev === 'WARNING' ? 'text-orange-500' : 'text-slate-400';
                   return (

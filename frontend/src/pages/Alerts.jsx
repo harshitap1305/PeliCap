@@ -45,13 +45,26 @@ const Alerts = () => {
   const [search, setSearch] = useState('');
 
   const { data: alerts = [], isLoading } = useQuery({
-    queryKey: ['alerts', sessionId],
+    queryKey: ['alerts', sessionId, isCapturing],
     queryFn: async () => {
-      // Pass session_id if available to scope alerts to this session
-      const params = new URLSearchParams({ n: '500' });
-      if (sessionId) params.set('session_id', sessionId);
-      const res = await api.get(`/api/alerts?${params}`);
-      return Array.isArray(res.data) ? res.data : [];
+      if (!sessionId) return [];
+      if (isCapturing) {
+        // Live session: read from in-memory AlertStore (real-time)
+        const params = new URLSearchParams({ n: '500', session_id: sessionId });
+        const res = await api.get(`/api/alerts?${params}`);
+        return Array.isArray(res.data) ? res.data : [];
+      } else {
+        // Historical session: read from PostgreSQL via AI service
+        try {
+          const res = await axios.get(`/ai/history/alerts?session_id=${sessionId}&limit=500`);
+          return Array.isArray(res.data) ? res.data : [];
+        } catch {
+          // Fallback to in-memory if AI service is down
+          const params = new URLSearchParams({ n: '500', session_id: sessionId });
+          const res = await api.get(`/api/alerts?${params}`);
+          return Array.isArray(res.data) ? res.data : [];
+        }
+      }
     },
     refetchInterval: isCapturing ? 5000 : false,
     enabled: !!sessionId,
