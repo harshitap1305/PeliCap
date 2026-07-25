@@ -365,11 +365,11 @@ const PacketExplorer = () => {
             <div className="flex-1 overflow-auto p-4">
               <div className="space-y-3 text-sm">
                 {/* Frame */}
-                <DetailSection title={`Frame: ${selectedPacket.captured_len} bytes`}>
+                <DetailSection title={`Frame: ${selectedPacket.captured_len ?? selectedPacket.length ?? 0} bytes`}>
                   <Field label="Arrival Time" value={formatTime(selectedPacket.timestamp_ns)} />
-                  <Field label="Frame Length" value={`${selectedPacket.original_len} bytes`} />
-                  <Field label="Capture Length" value={`${selectedPacket.captured_len} bytes`} />
-                  <Field label="Interface" value={selectedPacket.interface_name || selectedPacket.interface} />
+                  <Field label="Frame Length" value={`${selectedPacket.original_len ?? selectedPacket.length ?? 0} bytes`} />
+                  <Field label="Capture Length" value={`${selectedPacket.captured_len ?? selectedPacket.length ?? 0} bytes`} />
+                  <Field label="Interface" value={selectedPacket.interface_name || selectedPacket.interface || 'N/A'} />
                 </DetailSection>
 
                 {selectedPacket.eth && (
