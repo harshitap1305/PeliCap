@@ -333,17 +333,26 @@ AppProtocol FlowEngine::infer_app_protocol(const ParsedPacket& pkt) noexcept {
     if (pkt.tls)  return AppProtocol::HTTPS;
     if (pkt.icmp || pkt.icmpv6) return AppProtocol::ICMP;
 
-    // Port-based heuristic
+    // Port-based heuristic fallback if L7 dissector failed or hasn't run yet
     uint16_t port = 0;
     if (pkt.tcp) port = std::min(pkt.tcp->src_port, pkt.tcp->dst_port);
     if (pkt.udp) port = std::min(pkt.udp->src_port, pkt.udp->dst_port);
     switch (port) {
-        case 443:  return AppProtocol::HTTPS;
-        case 22:   return AppProtocol::SSH;
-        case 5432: return AppProtocol::Postgres;
-        case 3306: return AppProtocol::MySQL;
-        case 6379: return AppProtocol::Redis;
-        default:   return AppProtocol::Unknown;
+        case 80: case 8080: case 8000:   return AppProtocol::HTTP;
+        case 443: case 8443:             return AppProtocol::HTTPS;
+        case 53:                         return AppProtocol::DNS;
+        case 853:                        return AppProtocol::DNS_TLS;
+        case 22:                         return AppProtocol::SSH;
+        case 21:                         return AppProtocol::FTP;
+        case 25: case 587: case 465:     return AppProtocol::SMTP;
+        case 143: case 993:              return AppProtocol::IMAP;
+        case 110: case 995:              return AppProtocol::POP3;
+        case 5432:                       return AppProtocol::Postgres;
+        case 3306:                       return AppProtocol::MySQL;
+        case 6379:                       return AppProtocol::Redis;
+        case 27017:                      return AppProtocol::MongoDB;
+        case 1883: case 8883:            return AppProtocol::MQTT;
+        default:                         return AppProtocol::Unknown;
     }
 }
 
