@@ -178,7 +178,7 @@ async def explain_flow(req: ExplainFlowRequest):
     sni = f.get("tls_sni") or f.get("http_host") or ""
     bytes_fwd = f.get("fwd_bytes", 0) or 0
     bytes_rev = f.get("rev_bytes", 0) or 0
-    rtt_us = f.get("rtt_avg_us") or 0
+    rtt_us = f.get("avg_rtt_us") or 0
     retx = f.get("retransmit_count", 0) or 0
     dur_ms = f.get("duration_ms") or (f.get("duration_us", 0) or 0) / 1000
 
