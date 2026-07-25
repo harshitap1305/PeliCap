@@ -33,7 +33,7 @@ export const Badge = ({ children, variant = 'neutral', className }) => {
 };
 
 export const ProtocolBadge = ({ protocol }) => {
-  const p = protocol?.toLowerCase() || 'unknown';
+  const p = String(protocol || 'unknown').toLowerCase();
   let variant = 'neutral';
   let label = protocol;
   
