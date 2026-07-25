@@ -42,6 +42,11 @@ nlohmann::json SearchExecutor::execute(const planner::SqlPlan& plan) {
             
             if (!row["duration_ms"].is_null()) j["duration_ms"] = row["duration_ms"].as<int>();
             if (!row["payload_bytes"].is_null()) j["payload_bytes"] = row["payload_bytes"].as<uint64_t>();
+            if (!row["fwd_bytes"].is_null()) j["fwd_bytes"] = row["fwd_bytes"].as<uint64_t>();
+            if (!row["rev_bytes"].is_null()) j["rev_bytes"] = row["rev_bytes"].as<uint64_t>();
+            if (!row["avg_rtt_us"].is_null()) j["avg_rtt_us"] = row["avg_rtt_us"].as<int>();
+            if (!row["retransmit_count"].is_null()) j["retransmit_count"] = row["retransmit_count"].as<int>();
+            if (!row["tcp_state"].is_null()) j["tcp_state"] = row["tcp_state"].as<int>();
             
             if (!row["app_protocol"].is_null()) j["app_protocol"] = row["app_protocol"].as<int>();
             if (!row["tls_sni"].is_null()) j["tls_sni"] = row["tls_sni"].c_str();
