@@ -2,7 +2,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { ProtocolBadge } from '../components/ui/Badge';
-import { Search, Filter, Download, X, Layers } from 'lucide-react';
+import { Search, Filter, Download, X, Layers, Sparkles } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useQuery } from '@tanstack/react-query';
 import { useCaptureStore } from '../store/captureStore';
@@ -122,6 +122,25 @@ const PacketExplorer = () => {
   const [filterInput, setFilterInput] = useState('');
   const [activeFilter, setActiveFilter] = useState('');
   const parentRef = useRef(null);
+
+  // AI Explanation State
+  const [aiExplanation, setAiExplanation] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [showAiModal, setShowAiModal] = useState(false);
+
+  const handleAiAnalyze = async (packet) => {
+    setShowAiModal(true);
+    setAiExplanation('');
+    setAiLoading(true);
+    try {
+      const res = await api.post('/ai/explain-packet', { packet, session_id: sessionId });
+      setAiExplanation(res.data?.explanation || 'No explanation returned.');
+    } catch (e) {
+      setAiExplanation('AI analysis failed. Make sure the AI service is running.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ['packets', sessionId, isCapturing],
@@ -330,9 +349,18 @@ const PacketExplorer = () => {
           <Card noPadding className="w-1/3 flex flex-col shrink-0">
             <div className="flex justify-between items-center p-3 border-b border-slate-200 bg-slate-50 shrink-0">
               <h3 className="font-semibold text-slate-900 text-sm">Packet #{selectedPacket.id}</h3>
-              <button onClick={() => setSelectedPacket(null)} className="p-1 hover:bg-slate-200 rounded text-slate-500 transition-colors">
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center space-x-1">
+                <button 
+                  onClick={() => handleAiAnalyze(selectedPacket)}
+                  className="flex items-center space-x-1.5 px-2.5 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded transition-colors mr-1"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Analyze with AI</span>
+                </button>
+                <button onClick={() => setSelectedPacket(null)} className="p-1 hover:bg-slate-200 rounded text-slate-500 transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <div className="flex-1 overflow-auto p-4">
               <div className="space-y-3 text-sm">
@@ -416,6 +444,36 @@ const PacketExplorer = () => {
           </Card>
         )}
       </div>
+
+      {/* AI Explain Packet Modal */}
+      {showAiModal && selectedPacket && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-indigo-500" />
+                <span className="font-semibold text-slate-900">AI Packet Analysis</span>
+              </div>
+              <button onClick={() => { setShowAiModal(false); setAiExplanation(''); }}
+                className="text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4">
+              <div className="text-xs font-mono text-slate-500 mb-3">
+                Packet #{selectedPacket.id} | {selectedPacket.captured_len} bytes
+              </div>
+              {aiLoading
+                ? <div className="flex items-center gap-2 text-sm text-slate-500 py-6 justify-center">
+                    <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                    Analyzing with Groq...
+                  </div>
+                : <p className="text-sm text-slate-700 leading-relaxed">{aiExplanation}</p>
+              }
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
