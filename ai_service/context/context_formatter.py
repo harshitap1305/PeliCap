@@ -142,14 +142,14 @@ def format_flows(flows: list[dict], label: str = "FLOWS") -> str:
         proto = "TCP" if f.get("protocol") == 6 else "UDP" if f.get("protocol") == 17 else "OTHER"
         sni = f.get("tls_sni") or f.get("http_host") or ""
         sni_str = f" ({sni})" if sni else ""
-        bytes_total = (f.get("bytes_fwd", 0) or 0) + (f.get("bytes_rev", 0) or 0)
+        bytes_total = (f.get("fwd_bytes", 0) or 0) + (f.get("rev_bytes", 0) or 0)
         rtt_us = f.get("rtt_avg_us") or f.get("avg_rtt_us", 0)
         rtt_ms = rtt_us / 1000 if rtt_us else 0
         retx = f.get("retransmit_count", 0) or 0
         dur_ms = f.get("duration_ms") or f.get("duration_us", 0) / 1000
 
         line = f"  Flow #{f.get('flow_id','?')}: {src} → {dst} [{proto}{sni_str}]"
-        line += f"\n    Bytes: {bytes_total/1024:.1f}KB | Duration: {dur_ms:.0f}ms | RTT: {rtt_ms:.1f}ms | Retransmits: {retx}"
+        line += f"\n    Bytes: {bytes_total}B | Duration: {dur_ms:.0f}ms | RTT: {rtt_ms:.1f}ms | Retransmits: {retx}"
         lines.append(line)
     return "\n".join(lines)
 

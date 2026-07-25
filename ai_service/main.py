@@ -176,8 +176,8 @@ async def explain_flow(req: ExplainFlowRequest):
     dst = f"{f.get('dst_ip', '?')}:{f.get('dst_port', '?')}"
     proto = "TCP" if f.get("protocol") == 6 else "UDP" if f.get("protocol") == 17 else "OTHER"
     sni = f.get("tls_sni") or f.get("http_host") or ""
-    bytes_fwd = f.get("bytes_fwd", 0) or 0
-    bytes_rev = f.get("bytes_rev", 0) or 0
+    bytes_fwd = f.get("fwd_bytes", 0) or 0
+    bytes_rev = f.get("rev_bytes", 0) or 0
     rtt_us = f.get("rtt_avg_us") or 0
     retx = f.get("retransmit_count", 0) or 0
     dur_ms = f.get("duration_ms") or (f.get("duration_us", 0) or 0) / 1000
@@ -189,7 +189,7 @@ FLOW STATISTICS:
   {src} → {dst} [{proto}]
   Application: {sni or 'Unknown'}
   Duration: {dur_ms:.0f}ms
-  Bytes sent: {bytes_fwd/1024:.1f}KB  |  Bytes received: {bytes_rev/1024:.1f}KB
+  Bytes sent: {bytes_fwd}B  |  Bytes received: {bytes_rev}B
   RTT average: {rtt_us/1000:.1f}ms
   Retransmits: {retx}
   State: {f.get('state', f.get('tcp_state', 'N/A'))}
