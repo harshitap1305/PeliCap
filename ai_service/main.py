@@ -139,7 +139,16 @@ async def delete_conversation(conversation_id: str):
 async def explain_packet(req: ExplainPacketRequest):
     """Returns a plain-English explanation of a single packet."""
     pkt = req.packet
-    proto = pkt.get("transport", {}).get("protocol", "Unknown")
+    proto_num = pkt.get("transport", {}).get("protocol")
+    proto = "TCP" if proto_num == 6 else "UDP" if proto_num == 17 else "Unknown"
+    app_proto = pkt.get("app_protocol", "")
+    if isinstance(app_proto, int):
+        app_proto_map = {1: 'HTTP', 2: 'HTTPS', 5: 'DNS'}
+        app_proto = app_proto_map.get(app_proto, "")
+    
+    if app_proto:
+        proto = f"{proto} ({app_proto})"
+
     src = f"{pkt.get('network', {}).get('src_ip', '?')}:{pkt.get('transport', {}).get('src_port', '')}"
     dst = f"{pkt.get('network', {}).get('dst_ip', '?')}:{pkt.get('transport', {}).get('dst_port', '')}"
 

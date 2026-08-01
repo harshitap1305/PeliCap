@@ -16,8 +16,18 @@ const formatTime = (ns) => {
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}.${d.getMilliseconds().toString().padStart(3, '0')}`;
 };
 
+const APP_PROTOCOLS = {
+  1: 'HTTP', 2: 'HTTPS', 3: 'HTTP/2', 4: 'HTTP/3',
+  5: 'DNS', 6: 'DNS_TLS', 7: 'SSH', 8: 'FTP', 9: 'SMTP', 10: 'IMAP',
+  11: 'POP3', 12: 'Postgres', 13: 'MySQL', 14: 'Redis', 15: 'MongoDB',
+  16: 'MQTT', 17: 'WebSocket', 18: 'ARP', 19: 'ICMP', 20: 'ICMPv6'
+};
+
 const getProto = (pkt) => {
-  if (pkt.app_protocol) return pkt.app_protocol;
+  if (typeof pkt.app_protocol === 'number' && APP_PROTOCOLS[pkt.app_protocol]) {
+    return APP_PROTOCOLS[pkt.app_protocol];
+  }
+  if (typeof pkt.app_protocol === 'string') return pkt.app_protocol;
   if (pkt.http) return 'HTTP';
   if (pkt.dns) return 'DNS';
   if (pkt.tls) return 'TLS';
@@ -328,7 +338,7 @@ const PacketExplorer = () => {
                       <div className="px-4 py-1 w-24 shrink-0 border-r border-slate-100">
                         <ProtocolBadge protocol={proto} />
                       </div>
-                      <div className="px-4 py-1.5 w-20 shrink-0 border-r border-slate-100 text-right font-mono text-xs">{packet.captured_len}</div>
+                      <div className="px-4 py-1.5 w-20 shrink-0 border-r border-slate-100 text-right font-mono text-xs">{packet.captured_len ?? packet.length ?? 0}</div>
                       <div className="px-4 py-1.5 flex-1 truncate font-mono text-xs text-slate-500">{getInfo(packet)}</div>
                     </div>
                   );
