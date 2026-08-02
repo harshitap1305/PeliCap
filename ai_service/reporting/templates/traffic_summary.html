@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block content %}
+
+<!-- ── Executive Summary ──────────────────────────────────────────────── -->
+<div class="section">
+  <div class="section-title">Executive Summary</div>
+  <div class="exec-summary">
+    {% if ai_narrative %}
+      {% for para in ai_narrative.split('\n\n') %}
+        {% if para.strip() %}<p>{{ para.strip() }}</p>{% endif %}
+      {% endfor %}
+    {% else %}
+      <p>This traffic summary covers all network activity recorded during the selected capture session.
+      The report includes protocol distribution, top talkers, and traffic volume analysis.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ── Session Statistics ─────────────────────────────────────────────── -->
+<div class="section">
+  <div class="section-title">Session Statistics</div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="value">{{ summary.total_flows | format_number }}</div>
+      <div class="label">Total Flows</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">{{ summary.total_bytes | format_bytes }}</div>
+      <div class="label">Data Transferred</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">{{ summary.avg_rtt_us | format_rtt }}</div>
+      <div class="label">Avg RTT</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">{{ summary.total_retransmits | format_number }}</div>
+      <div class="label">Retransmits</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">{{ summary.unique_src_ips | format_number }}</div>
+      <div class="label">Unique Sources</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">{{ summary.unique_dst_ips | format_number }}</div>
+      <div class="label">Unique Destinations</div>
+    </div>
+  </div>
+
+  <!-- Protocol Distribution -->
+  {% if charts.protocol_pie %}
+  <div class="subsection-title">Protocol Distribution</div>
+  <div class="chart-row">
+    <div class="chart-container" style="flex:0 0 48%">
+      <img src="data:image/png;base64,{{ charts.protocol_pie }}" alt="Protocol distribution pie chart">
+      <div class="chart-caption">Figure 1 — Protocol distribution by flow count</div>
+    </div>
+    <div style="flex:1; padding-top:8pt;">
+      <table>
+        <thead><tr><th>Protocol</th><th>Flows</th><th>Data</th></tr></thead>
+        <tbody>
+        {% for p in summary.protocol_breakdown %}
+          <tr>
+            <td class="mono">{{ p.protocol }}</td>
+            <td>{{ p.count | format_number }}</td>
+            <td>{{ p.bytes | format_bytes }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ── Traffic Volume ─────────────────────────────────────────────────── -->
+{% if charts.bandwidth %}
+<div class="section">
+  <div class="section-title">Traffic Volume</div>
+  <div class="chart-container">
+    <img src="data:image/png;base64,{{ charts.bandwidth }}" alt="Bandwidth over time">
+    <div class="chart-caption">Figure 2 — Bandwidth over the session period</div>
+  </div>
+</div>
+{% endif %}
+
+<!-- ── Top Talkers ────────────────────────────────────────────────────── -->
+<div class="section">
+  <div class="section-title">Top Talkers</div>
+
+  <div class="subsection-title">Top Source IPs by Bytes Sent</div>
+  {% if charts.top_src %}
+  <div class="chart-container">
+    <img src="data:image/png;base64,{{ charts.top_src }}" alt="Top source IPs">
+    <div class="chart-caption">Figure 3 — Top source IPs by bytes sent</div>
+  </div>
+  {% endif %}
+
+  <table>
+    <thead><tr><th>Source IP</th><th>Bytes Sent</th></tr></thead>
+    <tbody>
+    {% for s in summary.top_src_ips %}
+      <tr>
+        <td class="mono">{{ s.ip }}</td>
+        <td>{{ s.bytes | format_bytes }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="subsection-title">Top Destination IPs by Bytes Received</div>
+  <table>
+    <thead><tr><th>Destination IP</th><th>Bytes Received</th></tr></thead>
+    <tbody>
+    {% for d in summary.top_dst_ips %}
+      <tr>
+        <td class="mono">{{ d.ip }}</td>
+        <td>{{ d.bytes | format_bytes }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- ── Appendix ───────────────────────────────────────────────────────── -->
+<div class="section">
+  <div class="section-title">Appendix</div>
+  <p class="appendix-note">The following table shows up to 100 flows from the session, sorted by data transferred.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Source</th><th>Destination</th><th>Protocol</th>
+        <th>Bytes</th><th>RTT</th><th>Retransmits</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for f in flows[:100] %}
+      <tr {% if f.retransmit_count > 10 %}class="highlight"{% endif %}>
+        <td class="mono">{{ f.src_ip }}:{{ f.src_port }}</td>
+        <td class="mono">{{ f.dst_ip }}:{{ f.dst_port }}</td>
+        <td>{{ f.protocol | proto_name }}</td>
+        <td>{{ ((f.fwd_bytes or 0) + (f.rev_bytes or 0)) | format_bytes }}</td>
+        <td>{{ f.avg_rtt_us | format_rtt }}</td>
+        <td>{{ f.retransmit_count or 0 }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

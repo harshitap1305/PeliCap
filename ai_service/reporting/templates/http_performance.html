@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="section">
+  <div class="section-title">Executive Summary</div>
+  <div class="exec-summary">
+    {% if ai_narrative %}
+      {% for para in ai_narrative.split('\n\n') %}
+        {% if para.strip() %}<p>{{ para.strip() }}</p>{% endif %}
+      {% endfor %}
+    {% else %}
+      <p>This report analyzes HTTP and HTTPS traffic patterns recorded during the capture session.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">HTTP Traffic Overview</div>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="value">{{ http_stats.total_http_flows | format_number }}</div>
+      <div class="label">HTTP/S Flows</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">{{ http_stats.avg_rtt_us | format_rtt }}</div>
+      <div class="label">Avg Latency</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">{{ http_stats.total_bytes | format_bytes }}</div>
+      <div class="label">Data Transferred</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Top Web Destinations</div>
+  {% if charts.top_hosts %}
+  <div class="chart-container">
+    <img src="data:image/png;base64,{{ charts.top_hosts }}" alt="Top HTTP hosts">
+    <div class="chart-caption">Top web destinations by flow count</div>
+  </div>
+  {% endif %}
+
+  <table>
+    <thead>
+      <tr><th>#</th><th>Host</th><th>Flows</th><th>Data</th><th>Avg Latency</th></tr>
+    </thead>
+    <tbody>
+    {% for h in http_stats.top_hosts %}
+      <tr {% if h.avg_rtt_ms > 500 %}class="highlight"{% endif %}>
+        <td>{{ loop.index }}</td>
+        <td class="mono">{{ h.host }}</td>
+        <td>{{ h.count | format_number }}</td>
+        <td>{{ h.total_bytes | format_bytes }}</td>
+        <td>{{ h.avg_rtt_ms }}ms</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

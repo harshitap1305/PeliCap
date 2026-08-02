@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="section">
+  <div class="section-title">Security Analysis Summary</div>
+  <div class="exec-summary">
+    {% if ai_narrative %}
+      {% for para in ai_narrative.split('\n\n') %}
+        {% if para.strip() %}<p>{{ para.strip() }}</p>{% endif %}
+      {% endfor %}
+    {% else %}
+      <p>This security report documents alerts and notable traffic patterns observed during the capture session.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Security Alert Summary</div>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="value">{{ alerts | length }}</div>
+      <div class="label">Total Alerts</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">{{ alerts | selectattr('severity', 'equalto', 'CRITICAL') | list | length }}</div>
+      <div class="label">Critical</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">{{ alerts | selectattr('severity', 'equalto', 'WARNING') | list | length }}</div>
+      <div class="label">Warning</div>
+    </div>
+  </div>
+
+  {% if charts.alert_timeline and alerts %}
+  <div class="chart-container">
+    <img src="data:image/png;base64,{{ charts.alert_timeline }}" alt="Alert timeline">
+    <div class="chart-caption">Alert timeline — severity and timing of all alerts</div>
+  </div>
+  {% endif %}
+
+  {% if alerts %}
+  <table>
+    <thead>
+      <tr><th>Time</th><th>Severity</th><th>Title</th><th>Source IP</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+    {% for a in alerts %}
+      <tr>
+        <td class="mono">{{ (a.timestamp_ns / 1e6) | int | format_ts }}</td>
+        <td>
+          <span class="badge badge-{{ a.severity | lower }}">{{ a.severity }}</span>
+        </td>
+        <td>{{ a.title }}</td>
+        <td class="mono">{{ a.src_ip or '—' }}</td>
+        <td>{{ 'Ongoing' if a.is_ongoing else 'Resolved' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#64748b; font-style:italic; margin-top:12pt;">No security alerts were recorded during this session.</p>
+  {% endif %}
+</div>
+
+<div class="section">
+  <div class="section-title">Notable Flows</div>
+  <p class="appendix-note">Flows with elevated retransmit counts or RTT are highlighted.</p>
+  <table>
+    <thead>
+      <tr><th>Source</th><th>Destination</th><th>RTT</th><th>Retransmits</th><th>Duration</th></tr>
+    </thead>
+    <tbody>
+    {% for f in suspicious_flows %}
+      <tr class="highlight">
+        <td class="mono">{{ f.src_ip }}:{{ f.src_port }}</td>
+        <td class="mono">{{ f.dst_ip }}:{{ f.dst_port }}</td>
+        <td>{{ f.avg_rtt_us | format_rtt }}</td>
+        <td>{{ f.retransmit_count or 0 }}</td>
+        <td>{{ f.duration_ms or 0 }}ms</td>
+      </tr>
+    {% else %}
+    <tr><td colspan="5" style="color:#64748b; font-style:italic;">No flows with elevated metrics.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

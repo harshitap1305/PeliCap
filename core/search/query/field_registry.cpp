@@ -47,10 +47,10 @@ bool FieldRegistry::is_valid_operator_for_type(FieldType type, const std::string
         return op == "=" || op == "!=" || op == ":" || op == "~/";
     }
     if (type == FieldType::IP) {
-        return op == "=" || op == "!=" || op == "IN" || op == "<<"; // << is CIDR contained by
+        return op == "=" || op == "!=" || op == ":" || op == "IN" || op == "<<"; // << is CIDR contained by
     }
     // numeric / timestamp / port
-    return op == "=" || op == "!=" || op == ">" || op == ">=" || op == "<" || op == "<=";
+    return op == "=" || op == "!=" || op == ":" || op == ">" || op == ">=" || op == "<" || op == "<=";
 }
 
 } // namespace query

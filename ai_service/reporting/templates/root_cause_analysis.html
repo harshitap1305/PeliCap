@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="section">
+  <div class="section-title">Root Cause Analysis</div>
+  <div class="exec-summary">
+    {% if ai_narrative %}
+      {% for para in ai_narrative.split('\n\n') %}
+        {% if para.strip() %}
+          {% set para_stripped = para.strip() %}
+          {% if para_stripped.startswith('## ') %}
+            <h3 style="font-size:12pt; font-weight:700; color:#1e293b; margin:14pt 0 6pt;">
+              {{ para_stripped[3:] }}
+            </h3>
+          {% elif para_stripped.startswith('# ') %}
+            <h2 style="font-size:14pt; font-weight:700; color:#0f172a; margin:18pt 0 8pt;">
+              {{ para_stripped[2:] }}
+            </h2>
+          {% else %}
+            <p>{{ para_stripped }}</p>
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      <p>No AI-generated RCA was produced. See the flow and alert data below for manual analysis.</p>
+    {% endif %}
+  </div>
+</div>
+
+{% if charts.rca_correlation %}
+<div class="section">
+  <div class="section-title">Incident Metric Correlation</div>
+  <div class="chart-container">
+    <img src="data:image/png;base64,{{ charts.rca_correlation }}" alt="RCA correlation chart">
+    <div class="chart-caption">Correlated metrics during the incident window — RTT, retransmit rate, and error rate</div>
+  </div>
+</div>
+{% endif %}
+
+<div class="section">
+  <div class="section-title">Alerts During Incident</div>
+  {% if alerts %}
+  <table>
+    <thead>
+      <tr><th>Severity</th><th>Title</th><th>Description</th><th>Source IP</th></tr>
+    </thead>
+    <tbody>
+    {% for a in alerts %}
+      <tr>
+        <td><span class="badge badge-{{ a.severity | lower }}">{{ a.severity }}</span></td>
+        <td>{{ a.title }}</td>
+        <td>{{ a.description[:120] if a.description else '—' }}</td>
+        <td class="mono">{{ a.src_ip or '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#64748b; font-style:italic;">No alerts were recorded during this session.</p>
+  {% endif %}
+</div>
+
+<div class="section">
+  <div class="section-title">Appendix — Affected Flows</div>
+  <table>
+    <thead>
+      <tr><th>Source</th><th>Destination</th><th>Protocol</th><th>RTT</th><th>Retransmits</th><th>Duration</th><th>Data</th></tr>
+    </thead>
+    <tbody>
+    {% for f in flows[:50] %}
+      <tr {% if f.retransmit_count > 5 or f.avg_rtt_us > 200000 %}class="highlight"{% endif %}>
+        <td class="mono">{{ f.src_ip }}:{{ f.src_port }}</td>
+        <td class="mono">{{ f.dst_ip }}:{{ f.dst_port }}</td>
+        <td>{{ f.protocol | proto_name }}</td>
+        <td>{{ f.avg_rtt_us | format_rtt }}</td>
+        <td>{{ f.retransmit_count or 0 }}</td>
+        <td>{{ f.duration_ms or 0 }}ms</td>
+        <td>{{ ((f.fwd_bytes or 0) + (f.rev_bytes or 0)) | format_bytes }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

@@ -23,3 +23,6 @@ RATE_LIMIT_PER_HOUR: int = int(os.environ.get("RATE_LIMIT_PER_HOUR", "100"))
 
 # Baseline tracking
 BASELINE_WINDOW: int = int(os.environ.get("BASELINE_WINDOW", "20"))  # num recent snapshots
+
+# Reporting system
+REPORTS_DIR: str = os.environ.get("REPORTS_DIR", "/app/reports")

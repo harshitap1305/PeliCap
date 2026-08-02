@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="section">
+  <div class="section-title">Executive Summary</div>
+  <div class="exec-summary">
+    {% if ai_narrative %}
+      {% for para in ai_narrative.split('\n\n') %}
+        {% if para.strip() %}<p>{{ para.strip() }}</p>{% endif %}
+      {% endfor %}
+    {% else %}
+      <p>This DNS report covers all Domain Name System activity recorded during the capture session.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">DNS Overview</div>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="value">{{ dns_stats.total_dns_flows | format_number }}</div>
+      <div class="label">DNS Flows</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">{{ dns_stats.unique_domains | format_number }}</div>
+      <div class="label">Unique Domains</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">{{ dns_stats.avg_rtt_us | format_rtt }}</div>
+      <div class="label">Avg Resolution Time</div>
+    </div>
+  </div>
+
+  {% if charts.dns_rate %}
+  <div class="chart-container">
+    <img src="data:image/png;base64,{{ charts.dns_rate }}" alt="DNS query rate">
+    <div class="chart-caption">DNS query rate over the session period</div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="section">
+  <div class="section-title">Top Queried Domains</div>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Domain</th><th>Queries</th><th>Avg RTT</th></tr>
+    </thead>
+    <tbody>
+    {% for d in dns_stats.top_domains %}
+      <tr {% if d.avg_rtt_ms > 200 %}class="highlight"{% endif %}>
+        <td>{{ loop.index }}</td>
+        <td class="mono">{{ d.domain }}</td>
+        <td>{{ d.count | format_number }}</td>
+        <td>{{ d.avg_rtt_ms }}ms</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import config
 from models.schemas import (
@@ -25,13 +26,31 @@ from conversation.conversation_store import store as conv_store
 from streaming.sse_handler import stream_to_sse
 from processing.response_processor import process as post_process
 from rate_limiting.rate_limiter import limiter
+from reporting.storage.report_store import store as report_store
+from reporting.api.report_routes import router as report_router
+from reporting.scheduler.rca_trigger import check_and_trigger_rca
+
 
 
 # ── Lifespan ───────────────────────────────────────────────────────────────────
+_scheduler: AsyncIOScheduler | None = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _scheduler
+    # Initialize conversation DB
     await conv_store.init_db()
+    # Initialize reporting DB tables
+    await report_store.init_db()
+    # Start APScheduler for auto-RCA trigger (every 60 seconds)
+    _scheduler = AsyncIOScheduler()
+    _scheduler.add_job(check_and_trigger_rca, 'interval', seconds=60,
+                       id='rca_trigger', replace_existing=True)
+    _scheduler.start()
     yield
+    # Cleanup
+    if _scheduler and _scheduler.running:
+        _scheduler.shutdown(wait=False)
 
 
 app = FastAPI(title="PeliCap AI Service", version="1.0.0", lifespan=lifespan)
@@ -42,6 +61,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Include report routes ──────────────────────────────────────────────────────
+app.include_router(report_router)
 
 
 # ── POST /ai/chat ─────────────────────────────────────────────────────────────
@@ -139,37 +161,119 @@ async def delete_conversation(conversation_id: str):
 async def explain_packet(req: ExplainPacketRequest):
     """Returns a plain-English explanation of a single packet."""
     pkt = req.packet
+
+    # ── Transport protocol ────────────────────────────────────────────────────
     proto_num = pkt.get("transport", {}).get("protocol")
-    proto = "TCP" if proto_num == 6 else "UDP" if proto_num == 17 else "Unknown"
+    if isinstance(proto_num, str):
+        proto_num = {"TCP": 6, "UDP": 17, "ICMP": 1}.get(proto_num.upper(), 0)
+    transport = {6: "TCP", 17: "UDP", 1: "ICMP", 58: "ICMPv6"}.get(proto_num, f"Proto {proto_num}")
+
+    # ── App protocol — try field first, then port lookup ─────────────────────
     app_proto = pkt.get("app_protocol", "")
     if isinstance(app_proto, int):
-        app_proto_map = {1: 'HTTP', 2: 'HTTPS', 5: 'DNS'}
-        app_proto = app_proto_map.get(app_proto, "")
-    
-    if app_proto:
-        proto = f"{proto} ({app_proto})"
+        _ap_map = {1: "HTTP", 2: "HTTPS/TLS", 5: "DNS", 3: "FTP", 4: "SMTP",
+                   6: "SSH", 7: "DHCP", 8: "NTP", 9: "IMAP", 10: "POP3",
+                   11: "QUIC", 12: "RDP", 13: "SNMP", 14: "MQTT"}
+        app_proto = _ap_map.get(app_proto, "")
 
-    src = f"{pkt.get('network', {}).get('src_ip', '?')}:{pkt.get('transport', {}).get('src_port', '')}"
-    dst = f"{pkt.get('network', {}).get('dst_ip', '?')}:{pkt.get('transport', {}).get('dst_port', '')}"
+    src_port = pkt.get("transport", {}).get("src_port") or 0
+    dst_port = pkt.get("transport", {}).get("dst_port") or 0
+    src_ip   = pkt.get("network", {}).get("src_ip", "?")
+    dst_ip   = pkt.get("network", {}).get("dst_ip", "?")
+    length   = pkt.get("length") or pkt.get("frame_length") or 0
 
-    prompt = f"""Explain this network packet in plain English for a developer who is not a networking expert.
-Be concise (3–5 sentences). State: what protocol it is, what it is doing, and what it means in context.
+    # ── Well-known port → service name (used when app_proto is unknown) ───────
+    _WELL_KNOWN = {
+        80: "HTTP", 443: "HTTPS", 53: "DNS", 22: "SSH", 25: "SMTP",
+        110: "POP3", 143: "IMAP", 993: "IMAPS", 587: "SMTP/submission",
+        8080: "HTTP-alt", 8443: "HTTPS-alt", 21: "FTP", 23: "Telnet",
+        3389: "RDP", 5900: "VNC", 67: "DHCP-server", 68: "DHCP-client",
+        123: "NTP", 161: "SNMP", 514: "Syslog", 1883: "MQTT",
+        3306: "MySQL", 5432: "PostgreSQL", 6379: "Redis", 27017: "MongoDB",
+    }
 
-PACKET DATA:
-  Protocol: {proto}
-  Source: {src}
-  Destination: {dst}
-  Flags: {pkt.get('transport', {}).get('flags', {})}
-  DNS query: {pkt.get('app', {}).get('dns_query_name', 'N/A')}
-  HTTP method: {pkt.get('app', {}).get('http_method', 'N/A')}
-  TLS SNI: {pkt.get('app', {}).get('tls_sni', 'N/A')}
-  Length: {pkt.get('length', 'N/A')} bytes
-"""
+    # Determine direction: if src_port is a well-known port (≤1024) this is a RESPONSE
+    is_response = src_port in _WELL_KNOWN or (src_port > 0 and src_port <= 1024)
+    is_request  = dst_port in _WELL_KNOWN or (dst_port > 0 and dst_port <= 1024)
+
+    service_port = src_port if is_response else dst_port
+    service_name = _WELL_KNOWN.get(service_port, "")
+    if not app_proto and service_name:
+        app_proto = service_name
+
+    direction = "response (server → client)" if is_response and not is_request else \
+                "request (client → server)" if is_request else "peer-to-peer"
+
+    # ── Packet size interpretation ────────────────────────────────────────────
+    if length == 0:
+        size_hint = "unknown size"
+    elif length <= 54:
+        size_hint = f"{length} bytes (TCP ACK with no payload — pure acknowledgment)"
+    elif length <= 78:
+        size_hint = f"{length} bytes (TCP handshake segment — SYN, SYN-ACK, or ACK; no application data)"
+    elif length <= 200:
+        size_hint = f"{length} bytes (small control/header packet — likely HTTP headers or a short response)"
+    elif length <= 1500:
+        size_hint = f"{length} bytes (data segment with payload)"
+    else:
+        size_hint = f"{length} bytes (large/jumbo frame)"
+
+    # ── TCP flags ─────────────────────────────────────────────────────────────
+    flags_raw = pkt.get("transport", {}).get("flags", {})
+    if isinstance(flags_raw, dict):
+        active_flags = [k.upper() for k, v in flags_raw.items() if v]
+        flags_str = ", ".join(active_flags) if active_flags else "none"
+    elif isinstance(flags_raw, int):
+        flag_bits = {0x02: "SYN", 0x10: "ACK", 0x01: "FIN", 0x04: "RST",
+                     0x08: "PSH", 0x20: "URG"}
+        flags_str = ", ".join(name for bit, name in flag_bits.items()
+                              if flags_raw & bit) or "none"
+    else:
+        flags_str = str(flags_raw) if flags_raw else "none"
+
+    # ── App-layer hints ───────────────────────────────────────────────────────
+    dns_query  = pkt.get("app", {}).get("dns_query_name") or pkt.get("dns_query_name") or ""
+    http_meth  = pkt.get("app", {}).get("http_method") or ""
+    tls_sni    = pkt.get("app", {}).get("tls_sni") or ""
+
+    app_hints = []
+    if dns_query: app_hints.append(f"DNS query for: {dns_query}")
+    if http_meth: app_hints.append(f"HTTP method: {http_meth}")
+    if tls_sni:   app_hints.append(f"TLS SNI (destination hostname): {tls_sni}")
+
+    # ── Packet-specific system prompt (not the chatty copilot prompt) ─────────
+    packet_system_prompt = (
+        "You are a network packet analysis tool. Given packet metadata, produce a precise, "
+        "factual 3–4 sentence explanation. Always state: (1) what protocol and service this is, "
+        "(2) what the packet is doing (handshake, data, close, query, etc.), "
+        "(3) the direction (who is the server, who is the client). "
+        "Do not say 'unknown' if the port number already identifies the service. "
+        "Be specific — name the port number and what service runs on it."
+    )
+
+    prompt = f"""Explain this network packet in plain English for a developer.
+
+PACKET FACTS:
+  Transport:   {transport}
+  Application: {app_proto or f'port {service_port}' if service_port else 'unknown'}
+  Direction:   {direction}
+  Source:      {src_ip}:{src_port}
+  Destination: {dst_ip}:{dst_port}
+  Size:        {size_hint}
+  TCP Flags:   {flags_str}
+  {chr(10).join(f'  {h}' for h in app_hints) if app_hints else ''}
+
+WELL-KNOWN PORT CONTEXT:
+  Port {src_port} = {_WELL_KNOWN.get(src_port, 'ephemeral/unknown')}
+  Port {dst_port} = {_WELL_KNOWN.get(dst_port, 'ephemeral/unknown')}
+
+Write your explanation now (3–4 sentences):"""
+
     try:
         result = await simple_completion(
-            [{"role": "system", "content": SYSTEM_PROMPT},
+            [{"role": "system", "content": packet_system_prompt},
              {"role": "user", "content": prompt}],
-            max_tokens=250,
+            max_tokens=280,
         )
         return {"explanation": result}
     except Exception as e:

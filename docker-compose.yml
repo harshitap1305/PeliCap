@@ -72,6 +72,9 @@ services:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - BACKEND_URL=http://localhost:8080
       - PG_DSN=postgresql://palicap:palicap@localhost:5434/palicap
+      - REPORTS_DIR=/app/reports
+    volumes:
+      - reports_data:/app/reports
     depends_on:
       - palicap
       - postgres
@@ -79,8 +82,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'      # Mostly idle; CPU spikes only on LLM response parsing
-          memory: 256M
+          cpus: '1.0'      # matplotlib + WeasyPrint need more CPU during report generation
+          memory: 512M     # matplotlib + WeasyPrint add significant memory overhead
 
   frontend:
     build:
@@ -105,3 +108,4 @@ services:
 
 volumes:
   pg_data:
+  reports_data:   # Persistent storage for generated report files

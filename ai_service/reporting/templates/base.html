@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{ title }} — PeliCap Report</title>
+<style>
+/* ── Page setup ──────────────────────────────────────────────────────────── */
+@page {
+  size: A4;
+  margin: 18mm 18mm 22mm 18mm;
+  @top-right {
+    content: "{{ title }}";
+    font-size: 8pt;
+    color: #94a3b8;
+    font-family: 'Arial', sans-serif;
+  }
+  @bottom-center {
+    content: "Page " counter(page) " of " counter(pages) "  ·  Generated " string(gen_date);
+    font-size: 8pt;
+    color: #94a3b8;
+    font-family: 'Arial', sans-serif;
+  }
+}
+
+/* ── Global ──────────────────────────────────────────────────────────────── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Arial', 'Helvetica Neue', sans-serif;
+  font-size: 11pt;
+  color: #334155;    /* slate-700 */
+  background: #ffffff;
+  line-height: 1.55;
+}
+
+/* Set running string for footer */
+.gen-date { string-set: gen_date content(); position: absolute; visibility: hidden; }
+
+/* ── Cover page ──────────────────────────────────────────────────────────── */
+.cover {
+  page-break-after: always;
+  height: 240mm;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 8mm;
+}
+.cover-logo {
+  font-size: 14pt;
+  font-weight: 700;
+  color: #2563eb;
+  letter-spacing: -0.02em;
+  margin-bottom: 32pt;
+}
+.cover-badge {
+  display: inline-block;
+  background: #eff6ff;
+  color: #2563eb;
+  border-radius: 4px;
+  padding: 3pt 10pt;
+  font-size: 9pt;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 16pt;
+}
+.cover-title {
+  font-size: 28pt;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.2;
+  margin-bottom: 16pt;
+}
+.cover-meta {
+  font-size: 10pt;
+  color: #64748b;
+  line-height: 2.0;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 12pt;
+  margin-top: 16pt;
+}
+.cover-meta strong { color: #1e293b; }
+
+/* ── Sections ────────────────────────────────────────────────────────────── */
+.section {
+  page-break-before: always;
+  margin-bottom: 16pt;
+}
+.section:first-of-type { page-break-before: avoid; }
+
+.section-title {
+  font-size: 16pt;
+  font-weight: 700;
+  color: #0f172a;
+  border-bottom: 2px solid #2563eb;
+  padding-bottom: 6pt;
+  margin-bottom: 14pt;
+}
+
+.subsection-title {
+  font-size: 12pt;
+  font-weight: 600;
+  color: #1e293b;
+  margin-top: 16pt;
+  margin-bottom: 8pt;
+}
+
+/* ── Executive summary ───────────────────────────────────────────────────── */
+.exec-summary {
+  background: #f8fafc;
+  border-left: 4px solid #2563eb;
+  padding: 14pt 16pt;
+  border-radius: 0 6px 6px 0;
+  margin-bottom: 16pt;
+  page-break-inside: avoid;
+}
+.exec-summary p { margin-bottom: 8pt; }
+.exec-summary p:last-child { margin-bottom: 0; }
+
+/* ── Narrative text ──────────────────────────────────────────────────────── */
+.narrative { margin-bottom: 14pt; }
+.narrative p { margin-bottom: 8pt; }
+.narrative p:last-child { margin-bottom: 0; }
+
+/* ── Charts ──────────────────────────────────────────────────────────────── */
+.chart-container {
+  margin: 12pt 0;
+  text-align: center;
+  page-break-inside: avoid;
+}
+.chart-container img {
+  max-width: 100%;
+  height: auto;
+}
+.chart-caption {
+  font-size: 9pt;
+  font-style: italic;
+  color: #64748b;
+  margin-top: 4pt;
+  text-align: center;
+}
+
+/* ── Two-column chart row ────────────────────────────────────────────────── */
+.chart-row {
+  display: flex;
+  gap: 12pt;
+  margin: 12pt 0;
+  page-break-inside: avoid;
+}
+.chart-row .chart-container { flex: 1; }
+
+/* ── Stats grid ──────────────────────────────────────────────────────────── */
+.stats-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8pt;
+  margin: 12pt 0;
+  page-break-inside: avoid;
+}
+.stat-card {
+  flex: 1;
+  min-width: 90pt;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10pt 12pt;
+  text-align: center;
+}
+.stat-card .value {
+  font-size: 18pt;
+  font-weight: 700;
+  color: #2563eb;
+  line-height: 1.2;
+}
+.stat-card .label {
+  font-size: 8pt;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 4pt;
+}
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9pt;
+  margin: 10pt 0;
+}
+thead {
+  display: table-header-group;  /* repeat on every page */
+}
+thead th {
+  background: #f1f5f9;
+  color: #0f172a;
+  font-weight: 600;
+  padding: 6pt 8pt;
+  text-align: left;
+  border-bottom: 1px solid #cbd5e1;
+  border-top: 1px solid #cbd5e1;
+}
+tbody tr:nth-child(even) { background: #f8fafc; }
+tbody tr:nth-child(odd)  { background: #ffffff; }
+tbody td {
+  padding: 5pt 8pt;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+}
+tbody tr.highlight { background: #fef3c7 !important; }
+
+/* ── Alert severity badges ───────────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  font-size: 7pt;
+  font-weight: 700;
+  padding: 2pt 6pt;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.badge-critical { background: #fee2e2; color: #991b1b; }
+.badge-warning  { background: #fef3c7; color: #92400e; }
+.badge-info     { background: #f1f5f9; color: #475569; }
+
+/* ── Mono ────────────────────────────────────────────────────────────────── */
+.mono { font-family: 'Courier New', monospace; font-size: 8.5pt; }
+
+/* ── Appendix ────────────────────────────────────────────────────────────── */
+.appendix-note {
+  font-size: 9pt;
+  color: #64748b;
+  font-style: italic;
+  margin: 8pt 0;
+}
+</style>
+</head>
+<body>
+
+<span class="gen-date">{{ generated_at }}</span>
+
+<!-- ── Cover Page ─────────────────────────────────────────────────────── -->
+<div class="cover">
+  <div class="cover-logo">⬡ PeliCap</div>
+  <div class="cover-badge">{{ report_type_label }}</div>
+  <div class="cover-title">{{ title }}</div>
+  <div class="cover-meta">
+    <strong>Session:</strong> {{ session_id }}<br>
+    <strong>Period:</strong> {{ session_start }} — {{ session_end }}<br>
+    <strong>Generated:</strong> {{ generated_at }}<br>
+    <strong>Format:</strong> {{ format | upper }}<br>
+    {% if ai_narrative_included %}
+    <strong>AI Narrative:</strong> Included ({{ primary_model }})
+    {% else %}
+    <strong>AI Narrative:</strong> Not included
+    {% endif %}
+  </div>
+</div>
+
+<!-- ── Main content (injected by child templates) ─────────────────────── -->
+{% block content %}{% endblock %}
+
+</body>
+</html>

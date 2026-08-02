@@ -9,6 +9,7 @@ import DnsAnalytics from './pages/DnsAnalytics';
 import HttpAnalytics from './pages/HttpAnalytics';
 import NetworkTopology from './pages/NetworkTopology';
 import Alerts from './pages/Alerts';
+import Reports from './pages/Reports';
 import AiCopilot from './pages/AiCopilot';
 import Settings from './pages/Settings';
 
@@ -26,6 +27,7 @@ function App() {
           <Route path="/http" element={<HttpAnalytics />} />
           <Route path="/topology" element={<NetworkTopology />} />
           <Route path="/alerts" element={<Alerts />} />
+          <Route path="/reports" element={<Reports />} />
           <Route path="/copilot" element={<AiCopilot />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>

@@ -14,7 +14,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Globe,
-  MonitorCheck
+  MonitorCheck,
+  FileText
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -101,6 +102,7 @@ const Sidebar = () => {
         {collapsed && <div className="h-4" />}
         
         <NavItem to="/alerts" icon={ShieldAlert} label="Alerts" collapsed={collapsed} badgeCount={alertCount} />
+        <NavItem to="/reports" icon={FileText} label="Reports" collapsed={collapsed} />
         <NavItem to="/copilot" icon={Bot} label="AI Copilot" collapsed={collapsed} />
       </nav>
 
