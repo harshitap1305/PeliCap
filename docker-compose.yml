@@ -39,10 +39,10 @@ services:
       -c effective_cache_size=768MB
       -c maintenance_work_mem=64MB
       -c work_mem=4MB
-      -c max_worker_processes=4
+      -c max_worker_processes=8
       -c max_parallel_workers=2
       -c max_parallel_workers_per_gather=1
-      -c timescaledb.max_background_workers=2
+      -c timescaledb.max_background_workers=4
       -c autovacuum_max_workers=2
       -c autovacuum_naptime=60
       -c wal_buffers=16MB

@@ -480,7 +480,7 @@ const Reports = () => {
                 </button>
               </div>
               <iframe
-                src={`/ai/reports/${previewReportId}/download?inline=true`}
+                src={`http://localhost:8001/api/reports/${previewReportId}/download?inline=true`}
                 className="w-full"
                 style={{ height: '700px', border: 'none' }}
                 title="Report Preview"
