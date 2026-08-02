@@ -103,7 +103,7 @@ async def get_report_metadata(report_id: int):
 
 
 @router.get("/{report_id}/download")
-async def download_report(report_id: int):
+async def download_report(report_id: int, inline: bool = False):
     """Download the report file."""
     report = await report_store.get_report(report_id)
     if not report:
@@ -122,11 +122,13 @@ async def download_report(report_id: int):
     filename_ext = {"pdf": "pdf", "docx": "docx", "markdown": "md"}.get(fmt, "pdf")
     filename = f"{report.get('report_type', 'report')}_{report_id}.{filename_ext}"
 
+    disposition = "inline" if inline else "attachment"
+
     return FileResponse(
         path=file_path,
         media_type=media_type_map.get(fmt, "application/octet-stream"),
         filename=filename,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
     )
 
 
