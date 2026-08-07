@@ -42,61 +42,86 @@ PeliCap is designed to serve a wide range of users, from networking experts to s
 ## 🏗️ High-Level Architecture
 PeliCap follows a layered architecture, starting from raw packet capture up to an AI Copilot layer.
 
-```text
-                     +----------------+
-                     | React Frontend |
-                     +----------------+
-                              |
-                              v
-                     +----------------+
-                     |   AI Copilot   |
-                     +----------------+
-                              |
-                              v
-             +--------------------------------+
-             |         Analytics Layer        |
-             | (Metrics, Detection, Search)   |
-             +--------------------------------+
-               |              |               |
-               v              v               v
-           TCP Engine     DNS Engine     HTTP Engine
+```mermaid
+flowchart TD
+    %% Define Styles
+    classDef hardware fill:#2d3436,stroke:#b2bec3,stroke-width:2px,color:#dfe6e9
+    classDef core fill:#0984e3,stroke:#74b9ff,stroke-width:2px,color:#fff
+    classDef db fill:#00b894,stroke:#55efc4,stroke-width:2px,color:#fff
+    classDef ai fill:#6c5ce7,stroke:#a29bfe,stroke-width:2px,color:#fff
+    classDef ui fill:#e17055,stroke:#fab1a0,stroke-width:2px,color:#fff
 
-             +--------------------------------+
-             |       Flow Reconstruction      |
-             +--------------------------------+
+    %% Components
+    NIC["📡 Network Interface (eth0, wlan0)"]:::hardware
+    PCAP["🗂️ PCAP File"]:::hardware
 
-             +--------------------------------+
-             |         Protocol Parser        |
-             +--------------------------------+
+    subgraph CoreEngine["⚙️ C++ Core Processing Engine"]
+        Capture["📥 Module 1: Capture Engine (PcapPlusPlus)"]:::core
+        Bus["🚏 SPSC PacketBus (Lock-Free Queue)"]:::core
+        Dissector["🔍 Module 2: Dissector Engine (Stateless)"]:::core
+        Flow["🌊 Module 3: Flow Reconstruction (absl::flat_hash_map)"]:::core
+        Metrics["📊 Module 4 & 5: Metrics & Detection Engine"]:::core
+        StorageEng["💾 Module 6: Storage Engine (Batch Writer)"]:::core
+    end
 
-             +--------------------------------+
-             |  Packet Capture / PCAP Loader  |
-             +--------------------------------+
+    subgraph DataLayer["🗄️ Persistence Layer"]
+        TimescaleDB[("🐘 TimescaleDB (PostgreSQL)")]:::db
+        DiskPCAP["📁 Truncated PCAP on Disk"]:::db
+    end
+
+    subgraph IntelligenceLayer["🧠 Intelligence & UI Layer"]
+        FastAPI["🐍 Python Backend (FastAPI)"]:::ai
+        Groq["🤖 LLM / AI Copilot (Groq API)"]:::ai
+        React["💻 React Frontend (Vite, Recharts)"]:::ui
+    end
+
+    %% Flow
+    NIC -->|Promiscuous Sniff| Capture
+    PCAP -->|Load File| Capture
+    
+    Capture -->|Raw Bytes| Bus
+    Bus -->|CapturedPacket| Dissector
+    Bus -->|Truncated Packet (96 bytes)| StorageEng
+    
+    Dissector -->|ParsedPacket (L2-L7)| Flow
+    Flow -->|Flow State (5-tuple)| Metrics
+    
+    Flow -.->|FLOW_CLOSED Event| StorageEng
+    Metrics -.->|Alerts & Metrics| StorageEng
+    
+    StorageEng -->|Bulk Insert via libpqxx| TimescaleDB
+    StorageEng -->|Write| DiskPCAP
+    
+    TimescaleDB <-->|Query Flows & Metrics| FastAPI
+    FastAPI <-->|RAG Context| Groq
+    FastAPI <-->|REST API| React
 ```
 
 ## ⚙️ The Pipeline & Module Architecture
 
 ### 1. Packet Capture Engine
 - **Purpose:** Capture all packets exactly as they appear on the wire from live interfaces (e.g., `eth0`, `docker0`) or uploaded `.pcap` files.
-- **Architecture:** Built in **C++** using `libpcap` for high-performance packet interception. It buffers and persists raw packets along with metadata (Timestamp, Interface, Length) to the storage layer.
+- **Architecture:** Built in **C++** using `PcapPlusPlus`. It employs an asynchronous thread to capture packets and dispatches them into a lock-free Single-Producer Single-Consumer (SPSC) `PacketBus` queue using `boost::lockfree`, ensuring zero dropped packets during traffic spikes.
 
 ### 2. Protocol Dissector Engine
 - **Purpose:** Convert raw bytes into meaningful protocol fields. We only parse what the analytics engine needs, avoiding the bloat of thousands of dissectors.
-- **Architecture:** Extracts critical fields for Phase 1 protocols (Ethernet, IPv4, TCP, UDP, ICMP) and Phase 2 (DNS, HTTP, TLS). Outputs structured JSON-like packet objects.
+- **Architecture:** A 100% stateless and thread-safe engine. It walks the OSI model (L2 to L7) extracting fields for Ethernet, IPv4, TCP, UDP, DNS, HTTP, and TLS. It safely builds a `ParsedPacket` struct using Return Value Optimization (RVO) without throwing C++ exceptions.
 
 ### 3. Flow Reconstruction Engine
 - **Purpose:** Transform isolated packets into meaningful conversations (flows). Real engineers analyze flows, not individual packets.
-- **Architecture:** Groups packets based on a 5-tuple flow key (Src IP, Dst IP, Src Port, Dst Port, Protocol). Tracks session state, TCP state, and flow duration, calculating bytes sent/received per conversation.
+- **Architecture:** Uses a high-performance hash map (`absl::flat_hash_map`) for CPU cache locality. It groups packets based on a 5-tuple flow key, tracks TCP state (SYN, ACK, FIN), calculates bidirectional bytes, and fires a pub/sub `FLOW_CLOSED` event for downstream storage.
 
 ### 4. Metrics & Detection Engine
 - **Purpose:** Generate useful statistics and automatically identify problems.
 - **Architecture:** 
   - **Metrics Engine:** Calculates bandwidth, throughput, RTT, retransmissions, average DNS resolution time, and latency distributions.
-  - **Detection Engine:** Constantly evaluates rules on the metrics (e.g., repeated sequence numbers = packet loss, sudden traffic increase = anomaly).
+  - **Detection Engine:** Constantly evaluates rules on the metrics (e.g., repeated sequence numbers = packet loss, sudden traffic increase = anomaly) and generates alerts.
 
 ### 5. Storage Layer
-- **Purpose:** Efficiently store packets, flows, metrics, alerts, and AI conversations.
-- **Architecture:** Powered by **TimescaleDB / PostgreSQL**. Raw packets are stored compressed, while flows, metrics, and alerts are stored relationally for fast querying and dashboard aggregations.
+- **Purpose:** Efficiently store flows, metrics, alerts, and truncated `.pcap` files for deep forensics.
+- **Architecture:** 
+  - **Database:** Powered by **TimescaleDB** using automatic background migrations. A C++ background `BatchWriter` buffers thousands of flow records and uses `libpqxx`'s `stream_to` for hyper-fast bulk insertions.
+  - **Disk Storage:** Raw packets are truncated to 96 bytes (keeping only headers) and written to rolling `.pcap` files, dramatically reducing disk usage while preserving forensic data.
 
 ### 6. AI Copilot (The Intelligence Layer)
 - **Purpose:** Translate networking data into human language, provide automated root cause analysis, and assist in interactive troubleshooting.
