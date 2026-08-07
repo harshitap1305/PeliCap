@@ -81,10 +81,10 @@ flowchart TD
     
     Capture -->|Raw Bytes| Bus
     Bus -->|CapturedPacket| Dissector
-    Bus -->|Truncated Packet (96 bytes)| StorageEng
+    Bus -->|Truncated Packet - 96 bytes| StorageEng
     
-    Dissector -->|ParsedPacket (L2-L7)| Flow
-    Flow -->|Flow State (5-tuple)| Metrics
+    Dissector -->|ParsedPacket L2 to L7| Flow
+    Flow -->|Flow State 5-tuple| Metrics
     
     Flow -.->|FLOW_CLOSED Event| StorageEng
     Metrics -.->|Alerts & Metrics| StorageEng
